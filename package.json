@@ -1,0 +1,16 @@
+{
+  "name": "almanac",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Personal planner: chronological agenda + year calendar, backed by Cloudflare D1.",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:create": "wrangler d1 create almanac-db",
+    "db:migrate:local": "wrangler d1 execute almanac-db --local --file=./schema.sql",
+    "db:migrate:remote": "wrangler d1 execute almanac-db --remote --file=./schema.sql"
+  },
+  "devDependencies": {
+    "wrangler": "^3.90.0"
+  }
+}
