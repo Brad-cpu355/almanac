@@ -2,28 +2,19 @@ name = "almanac"
 main = "src/worker.js"
 compatibility_date = "2024-09-23"
 
-# Static frontend (public/index.html + anything else you drop in public/).
-# Requests that don't match /api/* are served straight from here without
-# ever touching worker.js.
+# Static frontend
 [assets]
 directory = "./public"
 binding = "ASSETS"
 run_worker_first = true
 
-# Cloudflare D1 database for your events. Create it once with:
-#   wrangler d1 create almanac-db
-# then paste the database_id it prints below.
+# Production database
 [[d1_databases]]
 binding = "DB"
 database_name = "almanac-db"
 database_id = "0ccee185-278b-482c-a17b-5e53f8735a30"
-[env.preview]
-name = "almanac-preview"
 
-[[env.preview.d1_databases]]
-binding = "DB"
-database_name = "almanac-preview-db"
-database_id = "f50b5543-5c47-4956-930c-ba9473650b6f"
+# Preview configuration
 [previews]
 enabled = true
 
