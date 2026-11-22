@@ -156,6 +156,8 @@
   .filter-label{font-size:.72rem;color:var(--ink-faint);font-weight:600;margin-right:3px;}
   .filter-btn{border:1px solid var(--line);background:var(--surface);color:var(--ink-soft);border-radius:999px;padding:7px 12px;font-size:.78rem;font-weight:600;cursor:pointer;}
   .filter-btn.active{background:var(--accent);color:var(--accent-contrast);border-color:var(--accent);}
+  #view-school [data-school-filter]:not(.active){background:var(--surface);color:var(--ink-soft);border-color:var(--line);}
+  #view-school [data-school-filter].active{background:var(--accent);color:var(--accent-contrast);border-color:var(--accent);}
   .school-card{border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:16px;margin:0 0 18px;}
   .school-card h2{font-size:1.15rem;margin:0 0 8px;}
   .school-card p,.school-card li{font-size:.84rem;color:var(--ink-soft);line-height:1.5;}
@@ -604,7 +606,7 @@
     syncDot: document.getElementById("syncDot"),
     syncLabel: document.getElementById("syncLabel"),
     segButtons: document.querySelectorAll(".segmented button"),
-    filterButtons: document.querySelectorAll(".filter-btn"),
+    filterButtons: document.querySelectorAll("#mainFilters .filter-btn"),
     schoolCard: document.getElementById("schoolCard"),
     schoolCardTitle: document.getElementById("schoolCardTitle"),
     schoolCardContent: document.getElementById("schoolCardContent"),
@@ -721,10 +723,6 @@
       var active = b.dataset.schoolFilter === schoolTabFilter;
       b.classList.toggle("active", active);
       b.setAttribute("aria-pressed", active ? "true" : "false");
-      // Explicit styles avoid stale/overlapping active-button styling.
-      b.style.background = active ? "var(--accent)" : "var(--surface)";
-      b.style.color = active ? "var(--accent-contrast)" : "var(--ink-soft)";
-      b.style.borderColor = active ? "var(--accent)" : "var(--line)";
     });
   }
   updateSchoolFilterButtons();
