@@ -1003,7 +1003,7 @@
     el.errTitle.classList.remove("show");
     el.eventForm.reset();
     selectedCategory = "personal";
-    selectedSchool = opts.school || (UI.filter === "walter" || UI.filter === "ingalill" ? UI.filter : "");
+    selectedSchool = Object.prototype.hasOwnProperty.call(opts, "school") ? opts.school : (UI.view !== "school" && (UI.filter === "walter" || UI.filter === "ingalill") ? UI.filter : "");
 
     if(opts.mode === "edit"){
       var ev = opts.event;
