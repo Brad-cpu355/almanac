@@ -1196,7 +1196,7 @@
     };
     el.eventSaveBtn.disabled = true;
     try{
-      if(editingId){ await Store.update(editingId, data); }
+      if(editingId){ await Store.update(editingId, data); await loadSchoolNotices(); }
       else { await Store.add(data); }
       closeEventModal();
       showToast("Saved");
