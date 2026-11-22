@@ -358,7 +358,8 @@
       </div>
       <div id="schoolUpcoming"></div>
       <div class="school-card"><h2>School notices to check</h2>
-        <div id="schoolNotices"></div>
+        <button type="button" class="btn btn-ghost" id="noticeAddBtn">+ Add notice</button>
+        <div id="schoolNotices" style="margin-top:14px"></div>
         <p class="hint">Reference notes only. Gmail/Unikum syncing is not enabled.</p>
       </div>
     </section>
@@ -378,6 +379,20 @@
   </main>
 </div>
 
+<!-- School notice editor -->
+<div class="overlay" id="noticeOverlay" hidden>
+  <div class="panel">
+    <div class="panel-head"><h2 id="noticePanelTitle">School notice</h2><button type="button" class="btn btn-icon" id="noticeClose" aria-label="Close">×</button></div>
+    <form id="noticeForm">
+      <div class="field"><label for="noticeChild">Child</label><select id="noticeChild" required style="width:100%;padding:10px;background:var(--surface-2);color:var(--ink)"><option value="walter">Walter</option><option value="ingalill">Ingalill</option></select></div>
+      <div class="field"><label for="noticeTitle">Notice</label><input type="text" id="noticeTitle" maxlength="160" required></div>
+      <div class="field"><label for="noticeDetails">Details</label><textarea id="noticeDetails" maxlength="1000"></textarea></div>
+      <div class="field"><label for="noticeDue">Date (optional)</label><input type="date" id="noticeDue"></div>
+      <div class="field"><label for="noticeStatus">Status</label><select id="noticeStatus" style="width:100%;padding:10px;background:var(--surface-2);color:var(--ink)"><option value="action">Action required</option><option value="upcoming">Upcoming</option><option value="completed">Completed</option></select></div>
+      <div class="panel-actions"><button type="button" class="btn btn-danger" id="noticeDelete" hidden>Delete</button><button type="submit" class="btn btn-primary" id="noticeSave">Save notice</button></div>
+    </form>
+  </div>
+</div>
 <!-- Day panel -->
 <div class="overlay" id="dayOverlay" hidden>
   <div class="panel">
@@ -617,6 +632,18 @@
     mainFilters: document.getElementById("mainFilters"),
     schoolUpcoming: document.getElementById("schoolUpcoming"),
     schoolNotices: document.getElementById("schoolNotices"),
+    noticeAddBtn: document.getElementById("noticeAddBtn"),
+    noticeOverlay: document.getElementById("noticeOverlay"),
+    noticeForm: document.getElementById("noticeForm"),
+    noticePanelTitle: document.getElementById("noticePanelTitle"),
+    noticeChild: document.getElementById("noticeChild"),
+    noticeTitle: document.getElementById("noticeTitle"),
+    noticeDetails: document.getElementById("noticeDetails"),
+    noticeDue: document.getElementById("noticeDue"),
+    noticeStatus: document.getElementById("noticeStatus"),
+    noticeDelete: document.getElementById("noticeDelete"),
+    noticeSave: document.getElementById("noticeSave"),
+    noticeClose: document.getElementById("noticeClose"),
     schoolTabAdd: document.getElementById("schoolTabAdd"),
     agendaContent: document.getElementById("agendaContent"),
     addBtn: document.getElementById("addBtn"),
@@ -676,21 +703,95 @@
   }
   el.segButtons.forEach(function(b){ b.addEventListener("click", function(){ setView(b.dataset.view); }); });
 
+  /* ---------------- Editable school notices ---------------- */
+  var schoolNotices = [];
+  var editingNoticeId = null;
+  var noticeLoadError = "";
+  async function loadSchoolNotices(){
+    try {
+      var res = await fetch("/api/school-notices");
+      if(!res.ok) throw new Error("HTTP "+res.status);
+      schoolNotices = await res.json();
+      noticeLoadError = "";
+    } catch(err) {
+      noticeLoadError = "School notices could not be loaded. Please retry.";
+      console.error(err);
+    }
+    if(UI.view === "school") renderNotices();
+  }
+  function renderNotices(){
+    el.schoolNotices.innerHTML = "";
+    if(noticeLoadError){
+      var err=document.createElement("p");err.textContent=noticeLoadError;el.schoolNotices.appendChild(err);return;
+    }
+    var visible=schoolNotices.filter(function(n){return schoolTabFilter==="all" || n.child===schoolTabFilter;});
+    if(!visible.length){
+      var empty=document.createElement("p");empty.textContent="No school notices for this selection.";el.schoolNotices.appendChild(empty);return;
+    }
+    visible.forEach(function(n){
+      var box=document.createElement("div");
+      box.style.cssText="border-top:1px solid var(--line);padding:12px 0";
+      var heading=document.createElement("strong");heading.textContent=(n.child==="walter"?"Walter":"Ingalill")+" · "+(n.status==="completed"?"Completed":n.status==="upcoming"?"Upcoming":"Action required");
+      var title=document.createElement("p");title.textContent=n.title;
+      title.style.margin="6px 0";
+      box.appendChild(heading);box.appendChild(title);
+      if(n.details){var details=document.createElement("p");details.textContent=n.details;box.appendChild(details);}
+      if(n.dueDate){var due=document.createElement("p");due.textContent="Date: "+n.dueDate;box.appendChild(due);}
+      var edit=document.createElement("button");edit.type="button";edit.className="btn btn-ghost";edit.textContent="Edit";edit.addEventListener("click",function(){openNotice(n);});box.appendChild(edit);
+      if(n.status!=="completed"){
+        var done=document.createElement("button");done.type="button";done.className="btn btn-ghost";done.style.marginLeft="8px";done.textContent="Mark completed";
+        done.addEventListener("click",async function(){
+          done.disabled=true;
+          try{await saveNotice(n.id,{child:n.child,title:n.title,details:n.details,status:"completed",dueDate:n.dueDate});}catch(e){showToast(e.message,true);}finally{done.disabled=false;}
+        });box.appendChild(done);
+      }
+      el.schoolNotices.appendChild(box);
+    });
+  }
+  function openNotice(n){
+    editingNoticeId=n?n.id:null;
+    el.noticeForm.reset();
+    el.noticePanelTitle.textContent=n?"Edit notice":"New school notice";
+    el.noticeChild.value=n?n.child:(schoolTabFilter==="ingalill"?"ingalill":"walter");
+    el.noticeTitle.value=n?n.title:"";
+    el.noticeDetails.value=n?n.details:"";
+    el.noticeDue.value=n?n.dueDate:"";
+    el.noticeStatus.value=n?n.status:"action";
+    el.noticeDelete.hidden=!n;
+    el.noticeOverlay.hidden=false;
+  }
+  async function saveNotice(id,data){
+    var res=await fetch("/api/school-notices"+(id?"/"+encodeURIComponent(id):""),{
+      method:id?"PUT":"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(data)
+    });
+    if(!res.ok)throw new Error((await safeJson(res)).error||"Could not save notice");
+    await loadSchoolNotices();
+  }
+  el.noticeAddBtn.addEventListener("click",function(){openNotice(null);});
+  el.noticeClose.addEventListener("click",function(){el.noticeOverlay.hidden=true;});
+  el.noticeOverlay.addEventListener("click",function(e){if(e.target===el.noticeOverlay)el.noticeOverlay.hidden=true;});
+  el.noticeForm.addEventListener("submit",async function(e){
+    e.preventDefault();el.noticeSave.disabled=true;
+    try{
+      await saveNotice(editingNoticeId,{child:el.noticeChild.value,title:el.noticeTitle.value,details:el.noticeDetails.value,dueDate:el.noticeDue.value,status:el.noticeStatus.value});
+      el.noticeOverlay.hidden=true;showToast("Notice saved");
+    }catch(err){showToast(err.message,true);}finally{el.noticeSave.disabled=false;}
+  });
+  el.noticeDelete.addEventListener("click",async function(){
+    if(!editingNoticeId||!confirm("Delete this school notice?"))return;
+    el.noticeDelete.disabled=true;
+    try{
+      var res=await fetch("/api/school-notices/"+encodeURIComponent(editingNoticeId),{method:"DELETE"});
+      if(!res.ok)throw new Error("Could not delete notice");
+      el.noticeOverlay.hidden=true;await loadSchoolNotices();showToast("Notice deleted");
+    }catch(err){showToast(err.message,true);}finally{el.noticeDelete.disabled=false;}
+  });
+  loadSchoolNotices();
+
   /* ---------------- Dedicated school tab ---------------- */
   var schoolTabFilter = "all";
   function renderSchoolTab(){
-    var notices = {
-      walter: '<p><strong>Walter · Action required:</strong> Confirm status of Spanish, personal finance and mother-tongue application.</p><p><strong>Walter · Upcoming:</strong> Mathematics exam — 27 November 2026, Chapter 2.</p>',
-      ingalill: '<p><strong>Ingalill · Action required:</strong> Confirm mathematics exam date and follow up on reading homework.</p>'
-    };
-    var visible = schoolTabFilter === "all" ? ["walter","ingalill"] : [schoolTabFilter];
-    el.schoolNotices.innerHTML = visible.map(function(child){
-      if(child === "walter" && todayDate() > strToDate("2026-11-27")){
-        return '<p><strong>Walter · Follow up:</strong> Mathematics exam on 27 November has passed; confirm outcome.</p>' +
-          '<p><strong>Walter · Action required:</strong> Confirm status of Spanish, personal finance and mother-tongue application.</p>';
-      }
-      return notices[child];
-    }).join("");
+    renderNotices();
     var today = todayDate();
     var rows = Store.events.filter(function(ev){
       var child = schoolChild(ev);
