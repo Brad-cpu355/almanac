@@ -387,6 +387,9 @@
       <div class="field"><label for="noticeChild">Child</label><select id="noticeChild" required style="width:100%;padding:10px;background:var(--surface-2);color:var(--ink)"><option value="walter">Walter</option><option value="ingalill">Ingalill</option></select></div>
       <div class="field"><label for="noticeTitle">Notice</label><input type="text" id="noticeTitle" maxlength="160" required></div>
       <div class="field"><label for="noticeDetails">Details</label><textarea id="noticeDetails" maxlength="1000"></textarea></div>
+      <div class="field"><label for="noticeType">Type</label><select id="noticeType" style="width:100%;padding:10px"><option value="exam">Exam</option><option value="homework">Homework</option><option value="activity">School activity</option><option value="parent">Parent action</option><option value="other">Other</option></select></div>
+      <div class="field"><label for="noticeLink">Linked calendar event (optional)</label><select id="noticeLink" style="width:100%;padding:10px"><option value="">No linked event</option></select></div>
+      <div class="field"><label for="noticeSource">Source (optional)</label><input id="noticeSource" maxlength="160" placeholder="Manual, Gmail, Unikum…"></div>
       <div class="field"><label for="noticeDue">Date (optional)</label><input type="date" id="noticeDue"></div>
       <div class="field"><label for="noticeStatus">Status</label><select id="noticeStatus" style="width:100%;padding:10px;background:var(--surface-2);color:var(--ink)"><option value="action">Action required</option><option value="upcoming">Upcoming</option><option value="completed">Completed</option></select></div>
       <div class="panel-actions"><button type="button" class="btn btn-danger" id="noticeDelete" hidden>Delete</button><button type="submit" class="btn btn-primary" id="noticeSave">Save notice</button></div>
@@ -640,6 +643,9 @@
     noticeTitle: document.getElementById("noticeTitle"),
     noticeDetails: document.getElementById("noticeDetails"),
     noticeDue: document.getElementById("noticeDue"),
+    noticeType: document.getElementById("noticeType"),
+    noticeLink: document.getElementById("noticeLink"),
+    noticeSource: document.getElementById("noticeSource"),
     noticeStatus: document.getElementById("noticeStatus"),
     noticeDelete: document.getElementById("noticeDelete"),
     noticeSave: document.getElementById("noticeSave"),
@@ -737,17 +743,27 @@
       box.appendChild(heading);box.appendChild(title);
       if(n.details){var details=document.createElement("p");details.textContent=n.details;box.appendChild(details);}
       if(n.dueDate){var due=document.createElement("p");due.textContent="Date: "+n.dueDate;box.appendChild(due);}
+      if(n.linkedEventId){var linked=document.createElement("p");linked.textContent="Linked to calendar · "+(n.recordType||"school event");box.appendChild(linked);}
       var edit=document.createElement("button");edit.type="button";edit.className="btn btn-ghost";edit.textContent="Edit";edit.addEventListener("click",function(){openNotice(n);});box.appendChild(edit);
       if(n.status!=="completed"){
         var done=document.createElement("button");done.type="button";done.className="btn btn-ghost";done.style.marginLeft="8px";done.textContent="Mark completed";
         done.addEventListener("click",async function(){
           done.disabled=true;
-          try{await saveNotice(n.id,{child:n.child,title:n.title,details:n.details,status:"completed",dueDate:n.dueDate});}catch(e){showToast(e.message,true);}finally{done.disabled=false;}
+          try{await saveNotice(n.id,{child:n.child,title:n.title,details:n.details,status:"completed",dueDate:n.dueDate,linkedEventId:n.linkedEventId||"",recordType:n.recordType||"other",source:n.source||"manual"});}catch(e){showToast(e.message,true);}finally{done.disabled=false;}
         });box.appendChild(done);
       }
       el.schoolNotices.appendChild(box);
     });
   }
+  function populateNoticeLinks(selectedId){
+    var current = el.noticeLink.value;
+    el.noticeLink.innerHTML = '<option value="">No linked event</option>';
+    Store.events.filter(function(ev){return schoolChild(ev)===el.noticeChild.value;}).forEach(function(ev){
+      var option=document.createElement("option");option.value=ev.id;option.textContent=displayTitle(ev)+" — "+ev.date;el.noticeLink.appendChild(option);
+    });
+    el.noticeLink.value=selectedId||current||"";
+  }
+  el.noticeChild.addEventListener("change",function(){populateNoticeLinks("");});
   function openNotice(n){
     editingNoticeId=n?n.id:null;
     el.noticeForm.reset();
@@ -757,6 +773,9 @@
     el.noticeDetails.value=n?n.details:"";
     el.noticeDue.value=n?n.dueDate:"";
     el.noticeStatus.value=n?n.status:"action";
+    el.noticeType.value=n?(n.recordType||"other"):"other";
+    el.noticeSource.value=n?(n.source||"manual"):"manual";
+    populateNoticeLinks(n?n.linkedEventId:"");
     el.noticeDelete.hidden=!n;
     el.noticeOverlay.hidden=false;
   }
@@ -773,7 +792,7 @@
   el.noticeForm.addEventListener("submit",async function(e){
     e.preventDefault();el.noticeSave.disabled=true;
     try{
-      await saveNotice(editingNoticeId,{child:el.noticeChild.value,title:el.noticeTitle.value,details:el.noticeDetails.value,dueDate:el.noticeDue.value,status:el.noticeStatus.value});
+      await saveNotice(editingNoticeId,{child:el.noticeChild.value,title:el.noticeTitle.value,details:el.noticeDetails.value,dueDate:el.noticeDue.value,status:el.noticeStatus.value,linkedEventId:el.noticeLink.value,recordType:el.noticeType.value,source:el.noticeSource.value});
       el.noticeOverlay.hidden=true;showToast("Notice saved");
     }catch(err){showToast(err.message,true);}finally{el.noticeSave.disabled=false;}
   });
