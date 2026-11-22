@@ -16,4 +16,4 @@ run_worker_first = true
 [[d1_databases]]
 binding = "DB"
 database_name = "almanac-db"
-database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+database_id = "0ccee185-278b-482c-a17b-5e53f8735a30"
