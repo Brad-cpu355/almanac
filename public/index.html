@@ -319,12 +319,13 @@
       <div class="segmented" role="tablist" aria-label="View">
         <button type="button" data-view="agenda" class="active">Agenda</button>
         <button type="button" data-view="year">Year</button>
+        <button type="button" data-view="school">School</button>
       </div>
       <button type="button" class="btn btn-primary" id="addBtn">+ Add</button>
     </div>
   </header>
 
-  <div class="filter-bar" aria-label="Filter calendar events">
+  <div class="filter-bar" id="mainFilters" aria-label="Filter calendar events">
     <span class="filter-label">Show</span>
     <button type="button" class="filter-btn active" data-filter="all" aria-pressed="true">All</button>
     <button type="button" class="filter-btn" data-filter="walter" aria-pressed="false">Walter</button>
@@ -342,6 +343,24 @@
       <div id="agendaContent"></div>
     </section>
 
+    <section class="view" id="view-school">
+      <div class="school-card">
+        <h2>School planner</h2>
+        <p>Walter and Ingalill’s upcoming school events.</p>
+        <div class="filter-bar" aria-label="School child filter">
+          <button class="filter-btn active" type="button" data-school-filter="all">Both</button>
+          <button class="filter-btn" type="button" data-school-filter="walter">Walter</button>
+          <button class="filter-btn" type="button" data-school-filter="ingalill">Ingalill</button>
+        </div>
+        <button type="button" class="btn btn-primary" id="schoolTabAdd">+ Add school event</button>
+      </div>
+      <div id="schoolUpcoming"></div>
+      <div class="school-card"><h2>School notices to check</h2>
+        <p><strong>Walter:</strong> Mathematics exam — 27 November 2026, Chapter 2. Confirm status of Spanish, personal finance and mother-tongue application.</p>
+        <p><strong>Ingalill:</strong> Mathematics exam announced; date unconfirmed. Follow up on reading homework.</p>
+        <p class="hint">Reference notes only. Gmail/Unikum syncing is not enabled.</p>
+      </div>
+    </section>
     <section class="view" id="view-year">
       <div class="year-nav">
         <button type="button" class="btn-icon" id="yearPrev" aria-label="Previous year">
@@ -576,7 +595,7 @@
   (function loadUI(){
     try{
       var raw = localStorage.getItem("almanac-ui");
-      if(raw){ var p = JSON.parse(raw); if(p.view === "agenda" || p.view === "year") UI.view = p.view; if(["all","walter","ingalill","other"].indexOf(p.filter) !== -1) UI.filter = p.filter; }
+      if(raw){ var p = JSON.parse(raw); if(p.view === "agenda" || p.view === "year" || p.view === "school") UI.view = p.view; if(["all","walter","ingalill","other"].indexOf(p.filter) !== -1) UI.filter = p.filter; }
     }catch(e){}
   })();
   function saveUI(){ try{ localStorage.setItem("almanac-ui", JSON.stringify({view:UI.view,filter:UI.filter})); }catch(e){} }
@@ -593,6 +612,10 @@
     schoolAddBtn: document.getElementById("schoolAddBtn"),
     viewAgenda: document.getElementById("view-agenda"),
     viewYear: document.getElementById("view-year"),
+    viewSchool: document.getElementById("view-school"),
+    mainFilters: document.getElementById("mainFilters"),
+    schoolUpcoming: document.getElementById("schoolUpcoming"),
+    schoolTabAdd: document.getElementById("schoolTabAdd"),
     agendaContent: document.getElementById("agendaContent"),
     addBtn: document.getElementById("addBtn"),
     yearPrev: document.getElementById("yearPrev"),
@@ -644,9 +667,53 @@
     el.segButtons.forEach(function(b){ b.classList.toggle("active", b.dataset.view===v); });
     el.viewAgenda.classList.toggle("active", v==="agenda");
     el.viewYear.classList.toggle("active", v==="year");
+    el.viewSchool.classList.toggle("active", v==="school");
+    el.mainFilters.hidden = v==="school";
+    if(v==="school") renderSchoolTab();
     if(v==="year") renderYear();
   }
   el.segButtons.forEach(function(b){ b.addEventListener("click", function(){ setView(b.dataset.view); }); });
+
+  /* ---------------- Dedicated school tab ---------------- */
+  var schoolTabFilter = "all";
+  function renderSchoolTab(){
+    var today = todayDate();
+    var rows = Store.events.filter(function(ev){
+      var child = schoolChild(ev);
+      return child && (schoolTabFilter === "all" || schoolTabFilter === child);
+    }).map(function(ev){return {ev:ev, occ:nextOccurrence(ev,today) || strToDate(ev.date)};});
+    rows.sort(function(a,b){return a.occ-b.occ;});
+    el.schoolUpcoming.innerHTML = "";
+    if(!rows.length){
+      el.schoolUpcoming.innerHTML = '<div class="school-card"><h2>No saved school events yet</h2><p>Add a school event to see it here.</p></div>';
+      return;
+    }
+    rows.forEach(function(item){
+      var ev = item.ev, child = schoolChild(ev);
+      var row = document.createElement("button");
+      row.type = "button";
+      row.className = "school-card";
+      row.style.cssText = "display:block;width:100%;text-align:left;cursor:pointer;color:var(--ink)";
+      var title = document.createElement("strong");
+      title.textContent = displayTitle(ev);
+      var meta = document.createElement("p");
+      meta.textContent = (child === "walter" ? "Walter" : "Ingalill") + " · " + dateToStr(item.occ) + (ev.time ? " · "+ev.time : "");
+      row.appendChild(title);row.appendChild(meta);
+      if(ev.notes){var notes=document.createElement("p");notes.textContent=ev.notes;row.appendChild(notes);}
+      row.addEventListener("click",function(){openEventModal({mode:"edit",event:ev});});
+      el.schoolUpcoming.appendChild(row);
+    });
+  }
+  document.querySelectorAll("[data-school-filter]").forEach(function(btn){
+    btn.addEventListener("click",function(){
+      schoolTabFilter = btn.dataset.schoolFilter;
+      document.querySelectorAll("[data-school-filter]").forEach(function(b){b.classList.toggle("active",b===btn);});
+      renderSchoolTab();
+    });
+  });
+  el.schoolTabAdd.addEventListener("click",function(){
+    openEventModal({mode:"add",school:schoolTabFilter==="all"?"":schoolTabFilter});
+  });
 
   /* ---------------- School filtering and reference ---------------- */
   function renderSchoolCard(){
@@ -677,6 +744,7 @@
     renderSchoolCard();
     renderAgenda(filteredEvents(Store.events));
     if(UI.view === "year") renderYear();
+    if(UI.view === "school") renderSchoolTab();
   }
   function setFilter(filter){
     UI.filter = filter; saveUI();
