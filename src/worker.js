@@ -37,6 +37,7 @@ export default {
 
 async function handleApi(request, env, url) {
   const segments = url.pathname.split("/").filter(Boolean); // ["api", "events", id?]
+  if (segments[1] === "school-notices") return handleSchoolNotices(request, env, segments[2]);
   if (segments[1] !== "events") return json({ error: "Not found" }, 404);
 
   const id = segments[2];
@@ -81,6 +82,73 @@ async function handleApi(request, env, url) {
   }
 
   return json({ error: "Method not allowed" }, 405);
+}
+
+
+const NOTICE_CHILDREN = new Set(["walter", "ingalill"]);
+const NOTICE_STATUSES = new Set(["action", "upcoming", "completed"]);
+async function ensureSchoolNotices(db) {
+  await db.prepare(`CREATE TABLE IF NOT EXISTS school_notices (
+    id TEXT PRIMARY KEY, child TEXT NOT NULL, title TEXT NOT NULL,
+    details TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'action',
+    due_date TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL
+  )`).run();
+  await db.prepare(`CREATE TABLE IF NOT EXISTS school_notice_settings (
+    setting TEXT PRIMARY KEY, value TEXT NOT NULL
+  )`).run();
+  const seed = await db.prepare("SELECT value FROM school_notice_settings WHERE setting = 'initial_seed'").first();
+  if (!seed) {
+    const starter = [
+      ["walter","Mathematics exam — Chapter 2","27 November 2026","upcoming","2026-11-27"],
+      ["walter","Confirm Spanish and personal finance assessments","Check dates and outcomes","action",""],
+      ["walter","Confirm mother-tongue application decision","","action",""],
+      ["ingalill","Confirm mathematics exam date","Exam announced; date not confirmed","action",""],
+      ["ingalill","Follow up on reading homework","","action",""]
+    ];
+    const statements = starter.map(([child,title,details,status,due]) =>
+      db.prepare("INSERT OR IGNORE INTO school_notices (id,child,title,details,status,due_date,created_at) VALUES (?,?,?,?,?,?,?)")
+        .bind("starter-"+child+"-"+title.toLowerCase().replace(/[^a-z0-9]+/g,"-"),child,title,details,status,due,Date.now())
+    );
+    statements.push(db.prepare("INSERT OR IGNORE INTO school_notice_settings (setting,value) VALUES ('initial_seed','1')"));
+    await db.batch(statements);
+  }
+}
+function normalizeSchoolNotice(body) {
+  if (!body || !NOTICE_CHILDREN.has(body.child)) throw new ValidationError("Choose Walter or Ingalill");
+  const title = typeof body.title === "string" ? body.title.trim().slice(0,160) : "";
+  if (!title) throw new ValidationError("Notice title is required");
+  const due = typeof body.dueDate === "string" ? body.dueDate.trim() : "";
+  if (due && !/^\\d{4}-\\d{2}-\\d{2}$/.test(due)) throw new ValidationError("Invalid date");
+  return { child:body.child, title, details:typeof body.details === "string" ? body.details.trim().slice(0,1000) : "",
+    status:NOTICE_STATUSES.has(body.status) ? body.status : "action", dueDate:due };
+}
+function noticeFromRow(row) {
+  return {id:row.id,child:row.child,title:row.title,details:row.details,status:row.status,dueDate:row.due_date};
+}
+async function handleSchoolNotices(request, env, id) {
+  await ensureSchoolNotices(env.DB);
+  if (request.method === "GET" && !id) {
+    const {results} = await env.DB.prepare("SELECT * FROM school_notices ORDER BY CASE status WHEN 'completed' THEN 1 ELSE 0 END, due_date, created_at").all();
+    return json(results.map(noticeFromRow));
+  }
+  if (request.method === "POST" && !id) {
+    const n = normalizeSchoolNotice(await request.json());
+    const noticeId = crypto.randomUUID();
+    await env.DB.prepare("INSERT INTO school_notices (id,child,title,details,status,due_date,created_at) VALUES (?,?,?,?,?,?,?)")
+      .bind(noticeId,n.child,n.title,n.details,n.status,n.dueDate,Date.now()).run();
+    return json({id:noticeId,...n},201);
+  }
+  if (request.method === "PUT" && id) {
+    const n = normalizeSchoolNotice(await request.json());
+    const result = await env.DB.prepare("UPDATE school_notices SET child=?,title=?,details=?,status=?,due_date=? WHERE id=?")
+      .bind(n.child,n.title,n.details,n.status,n.dueDate,id).run();
+    return result.meta.changes ? json({id,...n}) : json({error:"Notice not found"},404);
+  }
+  if (request.method === "DELETE" && id) {
+    const result = await env.DB.prepare("DELETE FROM school_notices WHERE id=?").bind(id).run();
+    return result.meta.changes ? new Response(null,{status:204}) : json({error:"Notice not found"},404);
+  }
+  return json({error:"Method not allowed"},405);
 }
 
 function normalize(body) {
