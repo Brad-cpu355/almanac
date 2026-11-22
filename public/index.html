@@ -716,10 +716,22 @@
       el.schoolUpcoming.appendChild(row);
     });
   }
+  function updateSchoolFilterButtons(){
+    document.querySelectorAll("[data-school-filter]").forEach(function(b){
+      var active = b.dataset.schoolFilter === schoolTabFilter;
+      b.classList.toggle("active", active);
+      b.setAttribute("aria-pressed", active ? "true" : "false");
+      // Explicit styles avoid stale/overlapping active-button styling.
+      b.style.background = active ? "var(--accent)" : "var(--surface)";
+      b.style.color = active ? "var(--accent-contrast)" : "var(--ink-soft)";
+      b.style.borderColor = active ? "var(--accent)" : "var(--line)";
+    });
+  }
+  updateSchoolFilterButtons();
   document.querySelectorAll("[data-school-filter]").forEach(function(btn){
     btn.addEventListener("click",function(){
       schoolTabFilter = btn.dataset.schoolFilter;
-      document.querySelectorAll("[data-school-filter]").forEach(function(b){b.classList.toggle("active",b===btn);});
+      updateSchoolFilterButtons();
       renderSchoolTab();
     });
   });
