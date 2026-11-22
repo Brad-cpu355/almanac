@@ -125,32 +125,56 @@ function normalizeSchoolNotice(body) {
   if (!title) throw new ValidationError("Notice title is required");
   const due = typeof body.dueDate === "string" ? body.dueDate.trim() : "";
   if (due && !/^\d{4}-\d{2}-\d{2}$/.test(due)) throw new ValidationError("Invalid date");
-  return { child:body.child, title, details:typeof body.details === "string" ? body.details.trim().slice(0,1000) : "",
+  const linkedEventId = typeof body.linkedEventId === "string" ? body.linkedEventId.trim() : "";
+  const recordType = ["exam","homework","activity","parent","other"].includes(body.recordType) ? body.recordType : "other";
+  const source = typeof body.source === "string" ? body.source.trim().slice(0,160) : "manual";
+  return { linkedEventId, recordType, source, child:body.child, title, details:typeof body.details === "string" ? body.details.trim().slice(0,1000) : "",
     status:NOTICE_STATUSES.has(body.status) ? body.status : "action", dueDate:due };
 }
 function noticeFromRow(row) {
-  return {id:row.id,child:row.child,title:row.title,details:row.details,status:row.status,dueDate:row.due_date};
+  return {id:row.id,child:row.child,title:row.title,details:row.details,status:row.status,dueDate:row.due_date,
+    linkedEventId:row.event_id || "",recordType:row.record_type || "other",source:row.source || "manual"};
+}
+async function validateNoticeLink(db,id,n){
+  if(!n.linkedEventId)return;
+  const ev=await db.prepare("SELECT title FROM events WHERE id=?").bind(n.linkedEventId).first();
+  const prefix=n.child==="walter"?"[Walter · School] ":"[Ingalill · School] ";
+  if(!ev||!ev.title.startsWith(prefix))throw new ValidationError("Select a school event belonging to the same child");
+  const existing=await db.prepare("SELECT notice_id FROM school_notice_links WHERE event_id=? AND notice_id<>?").bind(n.linkedEventId,id).first();
+  if(existing)throw new ValidationError("This event is already linked to another notice");
+}
+async function saveNoticeLink(db,id,n){
+  if(!n.linkedEventId){
+    await db.prepare("DELETE FROM school_notice_links WHERE notice_id=?").bind(id).run();return;
+  }
+  await db.prepare("INSERT INTO school_notice_links (notice_id,event_id,record_type,source) VALUES (?,?,?,?) ON CONFLICT(notice_id) DO UPDATE SET event_id=excluded.event_id,record_type=excluded.record_type,source=excluded.source")
+    .bind(id,n.linkedEventId,n.recordType,n.source).run();
 }
 async function handleSchoolNotices(request, env, id) {
   await ensureSchoolNotices(env.DB);
   if (request.method === "GET" && !id) {
-    const {results} = await env.DB.prepare("SELECT * FROM school_notices ORDER BY CASE status WHEN 'completed' THEN 1 ELSE 0 END, due_date, created_at").all();
+    const {results} = await env.DB.prepare("SELECT n.*,l.event_id,l.record_type,l.source FROM school_notices n LEFT JOIN school_notice_links l ON l.notice_id=n.id ORDER BY CASE n.status WHEN 'completed' THEN 1 ELSE 0 END,n.due_date,n.created_at").all();
     return json(results.map(noticeFromRow));
   }
   if (request.method === "POST" && !id) {
     const n = normalizeSchoolNotice(await request.json());
     const noticeId = crypto.randomUUID();
+    await validateNoticeLink(env.DB,noticeId,n);
     await env.DB.prepare("INSERT INTO school_notices (id,child,title,details,status,due_date,created_at) VALUES (?,?,?,?,?,?,?)")
       .bind(noticeId,n.child,n.title,n.details,n.status,n.dueDate,Date.now()).run();
+    await saveNoticeLink(env.DB,noticeId,n);
     return json({id:noticeId,...n},201);
   }
   if (request.method === "PUT" && id) {
     const n = normalizeSchoolNotice(await request.json());
+    await validateNoticeLink(env.DB,id,n);
     const result = await env.DB.prepare("UPDATE school_notices SET child=?,title=?,details=?,status=?,due_date=? WHERE id=?")
       .bind(n.child,n.title,n.details,n.status,n.dueDate,id).run();
+    if(result.meta.changes)await saveNoticeLink(env.DB,id,n);
     return result.meta.changes ? json({id,...n}) : json({error:"Notice not found"},404);
   }
   if (request.method === "DELETE" && id) {
+    await env.DB.prepare("DELETE FROM school_notice_links WHERE notice_id=?").bind(id).run();
     const result = await env.DB.prepare("DELETE FROM school_notices WHERE id=?").bind(id).run();
     return result.meta.changes ? new Response(null,{status:204}) : json({error:"Notice not found"},404);
   }
