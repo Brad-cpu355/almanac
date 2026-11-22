@@ -723,7 +723,7 @@
       noticeLoadError = "School notices could not be loaded. Please retry.";
       console.error(err);
     }
-    if(UI.view === "school") renderNotices();
+    refreshCalendar();
   }
   function renderNotices(){
     el.schoolNotices.innerHTML = "";
@@ -742,7 +742,9 @@
       title.style.margin="6px 0";
       box.appendChild(heading);box.appendChild(title);
       if(n.details){var details=document.createElement("p");details.textContent=n.details;box.appendChild(details);}
-      if(n.dueDate){var due=document.createElement("p");due.textContent="Date: "+n.dueDate;box.appendChild(due);}
+      if(n.dueDate && n.details.indexOf(n.dueDate)<0 && n.details.indexOf(new Date(n.dueDate+"T12:00:00").toLocaleDateString("en-GB",{day:"numeric",month:"long",year:"numeric"}))<0){
+        var due=document.createElement("p");due.textContent="Date: "+n.dueDate;box.appendChild(due);
+      }
       if(n.linkedEventId){var linked=document.createElement("p");linked.textContent="Linked to calendar · "+(n.recordType||"school event");box.appendChild(linked);}
       var edit=document.createElement("button");edit.type="button";edit.className="btn btn-ghost";edit.textContent="Edit";edit.addEventListener("click",function(){openNotice(n);});box.appendChild(edit);
       if(n.status!=="completed"){
@@ -785,6 +787,7 @@
     });
     if(!res.ok)throw new Error((await safeJson(res)).error||"Could not save notice");
     await loadSchoolNotices();
+    if(data.linkedEventId && data.dueDate) await Store.init();
   }
   el.noticeAddBtn.addEventListener("click",function(){openNotice(null);});
   el.noticeClose.addEventListener("click",function(){el.noticeOverlay.hidden=true;});
@@ -834,6 +837,8 @@
       meta.textContent = (child === "walter" ? "Walter" : "Ingalill") + " · " + dateToStr(item.occ) + (ev.time ? " · "+ev.time : "");
       row.appendChild(title);row.appendChild(meta);
       if(ev.notes){var notes=document.createElement("p");notes.textContent=ev.notes;row.appendChild(notes);}
+      var notice=schoolNotices.find(function(n){return n.linkedEventId===ev.id;});
+      if(notice){var status=document.createElement("p");status.textContent="Status: "+(notice.status==="completed"?"Completed":notice.status==="upcoming"?"Upcoming":"Action required");row.appendChild(status);}
       row.addEventListener("click",function(){openEventModal({mode:"edit",event:ev});});
       el.schoolUpcoming.appendChild(row);
     });
@@ -989,6 +994,8 @@
 
     var chips = '<span class="chip" style="background:' + catTint(ev.category) + ';color:' + catColor(ev.category) + ';"><span class="dot" style="background:' + catColor(ev.category) + ';"></span>' + catLabel(ev.category) + '</span>';
     if(schoolChild(ev)) chips += '<span class="school-tag">' + (schoolChild(ev)==="walter" ? "Walter" : "Ingalill") + '</span>';
+    var schoolNotice=schoolNotices.find(function(n){return n.linkedEventId===ev.id;});
+    if(schoolNotice) chips += '<span class="chip">' + escapeHtml(schoolNotice.status==="completed"?"Completed":schoolNotice.status==="upcoming"?"Upcoming":"Action required") + '</span>';
     if(ev.recurring) chips += '<span class="chip recur">Yearly</span>';
 
     row.innerHTML =
