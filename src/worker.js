@@ -72,12 +72,20 @@ async function handleApi(request, env, url) {
       .bind(ev.title, ev.date, ev.time, ev.category, ev.recurring ? 1 : 0, ev.notes, id)
       .run();
     if (result.meta.changes === 0) return json({ error: "Event not found" }, 404);
+    // Keep the linked notice date consistent when a calendar event is edited.
+    // Preserve the notice status, title, and details.
+    await ensureSchoolNotices(env.DB);
+    await env.DB.prepare(
+      "UPDATE school_notices SET due_date=? WHERE id IN (SELECT notice_id FROM school_notice_links WHERE event_id=?)"
+    ).bind(ev.date,id).run();
     return json({ id, ...ev });
   }
 
   if (method === "DELETE" && id) {
     const result = await env.DB.prepare("DELETE FROM events WHERE id = ?").bind(id).run();
     if (result.meta.changes === 0) return json({ error: "Event not found" }, 404);
+    await ensureSchoolNotices(env.DB);
+    await env.DB.prepare("DELETE FROM school_notice_links WHERE event_id=?").bind(id).run();
     return new Response(null, { status: 204 });
   }
 
