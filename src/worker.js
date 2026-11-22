@@ -118,7 +118,7 @@ function normalizeSchoolNotice(body) {
   const title = typeof body.title === "string" ? body.title.trim().slice(0,160) : "";
   if (!title) throw new ValidationError("Notice title is required");
   const due = typeof body.dueDate === "string" ? body.dueDate.trim() : "";
-  if (due && !/^\\d{4}-\\d{2}-\\d{2}$/.test(due)) throw new ValidationError("Invalid date");
+  if (due && !/^\d{4}-\d{2}-\d{2}$/.test(due)) throw new ValidationError("Invalid date");
   return { child:body.child, title, details:typeof body.details === "string" ? body.details.trim().slice(0,1000) : "",
     status:NOTICE_STATUSES.has(body.status) ? body.status : "action", dueDate:due };
 }
