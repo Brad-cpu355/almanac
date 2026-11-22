@@ -96,6 +96,12 @@ async function ensureSchoolNotices(db) {
   await db.prepare(`CREATE TABLE IF NOT EXISTS school_notice_settings (
     setting TEXT PRIMARY KEY, value TEXT NOT NULL
   )`).run();
+  await db.prepare(`CREATE TABLE IF NOT EXISTS school_notice_links (
+    notice_id TEXT PRIMARY KEY,
+    event_id TEXT NOT NULL UNIQUE,
+    record_type TEXT NOT NULL DEFAULT 'other',
+    source TEXT NOT NULL DEFAULT 'manual'
+  )`).run();
   const seed = await db.prepare("SELECT value FROM school_notice_settings WHERE setting = 'initial_seed'").first();
   if (!seed) {
     const starter = [
