@@ -356,8 +356,7 @@
       </div>
       <div id="schoolUpcoming"></div>
       <div class="school-card"><h2>School notices to check</h2>
-        <p><strong>Walter:</strong> Mathematics exam — 27 November 2026, Chapter 2. Confirm status of Spanish, personal finance and mother-tongue application.</p>
-        <p><strong>Ingalill:</strong> Mathematics exam announced; date unconfirmed. Follow up on reading homework.</p>
+        <div id="schoolNotices"></div>
         <p class="hint">Reference notes only. Gmail/Unikum syncing is not enabled.</p>
       </div>
     </section>
@@ -615,6 +614,7 @@
     viewSchool: document.getElementById("view-school"),
     mainFilters: document.getElementById("mainFilters"),
     schoolUpcoming: document.getElementById("schoolUpcoming"),
+    schoolNotices: document.getElementById("schoolNotices"),
     schoolTabAdd: document.getElementById("schoolTabAdd"),
     agendaContent: document.getElementById("agendaContent"),
     addBtn: document.getElementById("addBtn"),
@@ -677,6 +677,18 @@
   /* ---------------- Dedicated school tab ---------------- */
   var schoolTabFilter = "all";
   function renderSchoolTab(){
+    var notices = {
+      walter: '<p><strong>Walter · Action required:</strong> Confirm status of Spanish, personal finance and mother-tongue application.</p><p><strong>Walter · Upcoming:</strong> Mathematics exam — 27 November 2026, Chapter 2.</p>',
+      ingalill: '<p><strong>Ingalill · Action required:</strong> Confirm mathematics exam date and follow up on reading homework.</p>'
+    };
+    var visible = schoolTabFilter === "all" ? ["walter","ingalill"] : [schoolTabFilter];
+    el.schoolNotices.innerHTML = visible.map(function(child){
+      if(child === "walter" && todayDate() > strToDate("2026-11-27")){
+        return '<p><strong>Walter · Follow up:</strong> Mathematics exam on 27 November has passed; confirm outcome.</p>' +
+          '<p><strong>Walter · Action required:</strong> Confirm status of Spanish, personal finance and mother-tongue application.</p>';
+      }
+      return notices[child];
+    }).join("");
     var today = todayDate();
     var rows = Store.events.filter(function(ev){
       var child = schoolChild(ev);
