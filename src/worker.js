@@ -170,7 +170,14 @@ async function handleSchoolNotices(request, env, id) {
     await validateNoticeLink(env.DB,id,n);
     const result = await env.DB.prepare("UPDATE school_notices SET child=?,title=?,details=?,status=?,due_date=? WHERE id=?")
       .bind(n.child,n.title,n.details,n.status,n.dueDate,id).run();
-    if(result.meta.changes)await saveNoticeLink(env.DB,id,n);
+    if(result.meta.changes){
+      await saveNoticeLink(env.DB,id,n);
+      // The notice owns status; the linked event owns its calendar appearance.
+      // A dated notice may update its linked event date, without changing the title.
+      if(n.linkedEventId && n.dueDate){
+        await env.DB.prepare("UPDATE events SET date=? WHERE id=?").bind(n.dueDate,n.linkedEventId).run();
+      }
+    }
     return result.meta.changes ? json({id,...n}) : json({error:"Notice not found"},404);
   }
   if (request.method === "DELETE" && id) {
