@@ -1010,6 +1010,28 @@
         '<div class="chip-row">' + chips + '</div>' +
       '</div>';
 
+    if(schoolNotice){
+      var statusButton=document.createElement("button");
+      statusButton.type="button";
+      statusButton.className="btn btn-ghost";
+      statusButton.style.cssText="margin:8px 0 0 0;padding:6px 10px;font-size:12px";
+      statusButton.textContent=schoolNotice.status==="completed"?"Reopen school task":"Mark completed";
+      statusButton.setAttribute("aria-label",statusButton.textContent+" — "+displayTitle(ev));
+      statusButton.addEventListener("click",async function(e){
+        e.stopPropagation();
+        statusButton.disabled=true;
+        try{
+          await saveNotice(schoolNotice.id,{
+            child:schoolNotice.child,title:schoolNotice.title,details:schoolNotice.details,
+            status:schoolNotice.status==="completed"?"upcoming":"completed",
+            dueDate:schoolNotice.dueDate,linkedEventId:schoolNotice.linkedEventId,
+            recordType:schoolNotice.recordType,source:schoolNotice.source
+          });
+          showToast("School status updated");
+        }catch(err){showToast(err.message||"Could not update school status",true);statusButton.disabled=false;}
+      });
+      row.querySelector(".event-main").appendChild(statusButton);
+    }
     row.addEventListener("click", function(){ openEventModal({mode:"edit", event:ev}); });
     return row;
   }
