@@ -24,3 +24,10 @@ name = "almanac-preview"
 binding = "DB"
 database_name = "almanac-preview-db"
 database_id = "f50b5543-5c47-4956-930c-ba9473650b6f"
+[previews]
+enabled = true
+
+[[previews.d1_databases]]
+binding = "DB"
+database_name = "almanac-preview-db"
+database_id = "f50b5543-5c47-4956-930c-ba9473650b6f"
