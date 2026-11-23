@@ -335,18 +335,19 @@
     <button type="button" class="filter-btn" data-filter="ingalill" aria-pressed="false">Ingalill</button>
     <button type="button" class="filter-btn" data-filter="other" aria-pressed="false">Other events</button>
   </div>
-  <section class="school-card" id="schoolCard" hidden aria-label="School information">
-    <h2 id="schoolCardTitle">School</h2>
-    <div id="schoolCardContent"></div>
-    <button type="button" class="btn btn-ghost" id="schoolAddBtn">+ Add school event</button>
-    <p class="hint">School information is a reference only until you save an event. No automatic Gmail sync is enabled.</p>
-  </section>
+
   <main>
     <section class="view active" id="view-agenda">
       <div id="agendaContent"></div>
     </section>
 
     <section class="view" id="view-school">
+  <section class="school-card" id="schoolCard" hidden aria-label="School information">
+    <h2 id="schoolCardTitle">School</h2>
+    <div id="schoolCardContent"></div>
+    <button type="button" class="btn btn-ghost" id="schoolAddBtn">+ Add school event</button>
+    <p class="hint">Reference information only. Use the school planner or reviewed Gmail suggestions to save events.</p>
+  </section>
       <div class="school-card">
         <h2>School planner</h2>
         <p>Walter and Ingalill’s upcoming school events.</p>
@@ -654,6 +655,7 @@
     viewAgenda: document.getElementById("view-agenda"),
     viewYear: document.getElementById("view-year"),
     viewSchool: document.getElementById("view-school"),
+    viewPersonal: document.getElementById("view-personal"),
     mainFilters: document.getElementById("mainFilters"),
     schoolUpcoming: document.getElementById("schoolUpcoming"),
     schoolNotices: document.getElementById("schoolNotices"),
@@ -725,7 +727,8 @@
     el.viewAgenda.classList.toggle("active", v==="agenda");
     el.viewYear.classList.toggle("active", v==="year");
     el.viewSchool.classList.toggle("active", v==="school");
-    el.mainFilters.hidden = v==="school";
+    el.viewPersonal.classList.toggle("active", v==="personal");
+    el.mainFilters.hidden = v==="school" || v==="personal";
     if(v==="school") renderSchoolTab();
     if(v==="year") renderYear();
   }
@@ -1001,6 +1004,7 @@
   /* ---------------- Dedicated school tab ---------------- */
   var schoolTabFilter = "all";
   function renderSchoolTab(){
+    renderSchoolCard();
     renderNotices();
     var today = todayDate();
     var rows = Store.events.filter(function(ev){
@@ -1052,8 +1056,8 @@
 
   /* ---------------- School filtering and reference ---------------- */
   function renderSchoolCard(){
-    var child = UI.filter;
-    el.schoolCard.hidden = child !== "walter" && child !== "ingalill";
+    var child = schoolTabFilter;
+    el.schoolCard.hidden = child === "all";
     if(el.schoolCard.hidden) return;
     if(child === "walter"){
       el.schoolCardTitle.textContent = "Walter · Linnéskolan";
@@ -1076,7 +1080,6 @@
     }
   }
   function refreshCalendar(){
-    renderSchoolCard();
     renderAgenda(filteredEvents(Store.events));
     if(UI.view === "year") renderYear();
     if(UI.view === "school") renderSchoolTab();
