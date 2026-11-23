@@ -377,6 +377,69 @@ async function handleSchoolEmail(request,env,url,action) {
     }
     return json({added,skipped,checked:(list.messages||[]).length});
   }
+  if(action==="actions" && request.method==="POST"){
+    const input=await request.json();
+    if(typeof input.id!=="string"||input.id.length>200)throw new ValidationError("Invalid suggestion");
+    const row=await env.DB.prepare("SELECT * FROM school_email_suggestions WHERE message_id=? AND review_status='pending'").bind(input.id).first();
+    if(!row)return json({error:"Pending school email not found"},404);
+    if(!verifiedSchoolSender(row.sender)||row.sender.toLowerCase().includes("maria.rosenqvist@malmo.se"))
+      return json({error:"Sender not eligible"},403);
+    const token=await gmailAccessToken(env);
+    const message=await gmailRequest(token,"messages/"+encodeURIComponent(input.id)+"?format=full");
+    const headers=message.payload?.headers||[];
+    const sender=headers.find(h=>h.name.toLowerCase()==="from")?.value||"";
+    if(!verifiedSchoolSender(sender)||sender.toLowerCase().includes("maria.rosenqvist@malmo.se"))
+      return json({error:"Sender verification failed"},403);
+    const subject=(headers.find(h=>h.name.toLowerCase()==="subject")?.value||"").slice(0,160);
+    const plain=gmailBodyText(message);
+    const htmlParts=[];
+    function visit(part,depth){
+      if(depth>6||htmlParts.length>=4)return;
+      if(part.mimeType==="text/html"&&part.body?.data){
+        try{htmlParts.push(new TextDecoder().decode(unb64url(part.body.data).slice(0,50000)));}catch{}
+      }
+      for(const child of part.parts||[])visit(child,depth+1);
+    }
+    visit(message.payload||{},0);
+    const html=htmlParts.join("\n").slice(0,90000);
+    if(!plain&&!html)return json({error:"No readable email body available"},422);
+    const textBody=plain||html.replace(/<[^>]*>/g," ").replace(/&nbsp;/gi," ").replace(/&amp;/gi,"&");
+    if(/(diagnos|psykolog|kurator|elevhälsa|sjukdom|therapy|therapist|medical|health|socialtjänst|safeguard)/i.test(subject+" "+textBody))
+      return json({error:"Potentially sensitive correspondence: analysis skipped."},403);
+    const links=[],seen=new Set();
+    function addLink(raw,label){
+      if(links.length>=12)return;
+      const candidate=String(raw||"").replace(/&amp;/gi,"&").trim();
+      try{
+        const u=new URL(candidate);
+        if(u.protocol!=="https:"||u.username||u.password||u.hostname==="localhost"||u.hostname.endsWith(".local")||/^\d+\.\d+\.\d+\.\d+$/.test(u.hostname))return;
+        if(seen.has(u.href))return;seen.add(u.href);
+        links.push({url:u.href.slice(0,1500),label:String(label||u.hostname).replace(/<[^>]*>/g," ").replace(/\s+/g," ").trim().slice(0,100),host:u.hostname});
+      }catch{}
+    }
+    const anchor=/<a\b[^>]*\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))[^>]*>([\s\S]*?)<\/a>/gi;
+    for(const m of html.matchAll(anchor))addLink(m[1]||m[2]||m[3],m[4]);
+    for(const m of (plain||"").matchAll(/https:\/\/[^\s<>"']+/gi))addLink(m[0].replace(/[),.;]+$/,""),"Link in email");
+    const actions=[];
+    const source=(subject+" "+textBody).slice(0,12000);
+    if(/(beslut har tagits|beslutet som tagits|handläggningen.*slutfört|ärendet.*slutfört)/i.test(source))
+      actions.push("A decision is available. Open the linked case and check the outcome; approval or rejection is not stated here.");
+    else if(/(klicka på länken|följ länken|logga in|öppna länken)/i.test(source))
+      actions.push("Open the link in the email to view the information or complete the requested step.");
+    if(/(svara senast|anmäl dig|bekräfta|fyll i|skicka in|signera)/i.test(source))
+      actions.push("The message may request a reply, registration, confirmation, form or signature. Verify the exact instruction in Gmail.");
+    const proposed=suggestDateTime(subject,textBody,Number(message.internalDate)||row.received_at);
+    const attachments=[];
+    function files(part,depth){
+      if(depth>6||attachments.length>=8)return;
+      if(part.filename)attachments.push(String(part.filename).slice(0,120));
+      for(const child of part.parts||[])files(child,depth+1);
+    }
+    files(message.payload||{},0);
+    return json({actions,links,attachments,proposed:{date:proposed.date,time:proposed.time,ambiguous:proposed.ambiguous,confidence:proposed.confidence},
+      suggestedTitle:actions.length?(actions[0].startsWith("A decision")?"Check school application decision":"Review school email action"):"",
+      note:"Rule-based suggestions only. Links are unverified external destinations. Confirm details in the original email. No email body was stored."});
+  }
   if(action==="summarize" && request.method==="POST"){
     if(!env.OPENAI_API_KEY)return json({error:"English summaries are not configured yet. Add OPENAI_API_KEY to preview secrets."},503);
     const body=await request.json();
