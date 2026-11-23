@@ -345,6 +345,14 @@
         <p><button type="button" class="btn btn-ghost" id="reviewSchoolJump">School: <strong id="reviewSchoolCount">…</strong> →</button> <button type="button" class="btn btn-ghost" id="reviewPersonalJump">Personal: <strong id="reviewPersonalCount">…</strong> →</button></p>
         <p class="hint" id="reviewScanHint">Counts reflect emails already scanned, not your live Gmail inbox.</p>
       </section>
+      <section class="school-card" id="generalTasks" aria-label="General tasks">
+        <h2>☑ My tasks <span id="generalTaskCount">…</span></h2>
+        <form id="generalTaskForm" style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0">
+          <input id="generalTaskInput" type="text" maxlength="500" required placeholder="Add a task" aria-label="New task" style="flex:1;min-width:160px;padding:9px;border:1px solid var(--line);border-radius:8px">
+          <button class="btn btn-primary" type="submit">+ Add task</button>
+        </form>
+        <div id="generalTaskList"><p class="hint">Loading tasks…</p></div>
+      </section>
       <section class="school-card" id="agendaTasks" aria-label="School actions requiring attention"><h2>☑ School actions <span id="agendaTaskCount">…</span></h2><div id="agendaTaskList"><p class="hint">Loading school actions…</p></div></section>
       <div id="agendaContent"></div>
     </section>
@@ -738,6 +746,7 @@
     el.segButtons.forEach(function(b){ b.classList.toggle("active", b.dataset.view===v); });
     el.viewAgenda.classList.toggle("active", v==="agenda");
     document.getElementById("agendaTasks").hidden = v!=="agenda";
+    document.getElementById("generalTasks").hidden = v!=="agenda";
     document.getElementById("emailReviewSummary").hidden = v!=="agenda";
     el.viewYear.classList.toggle("active", v==="year");
     el.viewSchool.classList.toggle("active", v==="school");
@@ -1580,6 +1589,50 @@
       else if(!el.dayOverlay.hidden) closeDayModal();
     }
   });
+
+
+  /* General tasks: independent of school actions */
+  var generalTasks=[];
+  async function generalTaskRequest(path,options){
+    var response=await fetch("/api/tasks"+(path||""),Object.assign({cache:"no-store"},options||{}));
+    if(!response.ok){var data=await response.json().catch(function(){return {};});throw new Error(data.error||"Task request failed");}
+    return response.status===204?null:response.json();
+  }
+  async function loadGeneralTasks(){
+    try{generalTasks=await generalTaskRequest("");renderGeneralTasks();}
+    catch(err){document.getElementById("generalTaskCount").textContent="—";document.getElementById("generalTaskList").textContent="Unable to load tasks: "+err.message;}
+  }
+  function renderGeneralTasks(){
+    var list=document.getElementById("generalTaskList"),count=document.getElementById("generalTaskCount");
+    list.replaceChildren();
+    count.textContent=String(generalTasks.filter(function(t){return !t.done;}).length)+" open";
+    if(!generalTasks.length){var empty=document.createElement("p");empty.className="hint";empty.textContent="No tasks yet.";list.appendChild(empty);return;}
+    generalTasks.forEach(function(task){
+      var row=document.createElement("div");row.style.cssText="display:flex;gap:9px;align-items:center;border-top:1px solid var(--line);padding:10px 0";
+      var toggle=document.createElement("input");toggle.type="checkbox";toggle.checked=task.done;toggle.setAttribute("aria-label","Complete "+task.text);
+      var label=document.createElement("span");label.textContent=task.text;label.style.cssText="flex:1;overflow-wrap:anywhere"+(task.done?";text-decoration:line-through;opacity:.65":"");
+      var del=document.createElement("button");del.type="button";del.className="btn btn-ghost";del.textContent="Delete";del.setAttribute("aria-label","Delete "+task.text);
+      toggle.addEventListener("change",async function(){
+        toggle.disabled=true;
+        try{await generalTaskRequest("/"+encodeURIComponent(task.id),{method:"PUT",headers:{"content-type":"application/json"},body:JSON.stringify({done:toggle.checked})});await loadGeneralTasks();}
+        catch(err){toggle.checked=!toggle.checked;showToast(err.message,true);toggle.disabled=false;}
+      });
+      del.addEventListener("click",async function(){
+        if(!confirm("Delete this task?"))return;
+        del.disabled=true;
+        try{await generalTaskRequest("/"+encodeURIComponent(task.id),{method:"DELETE"});await loadGeneralTasks();}
+        catch(err){showToast(err.message,true);del.disabled=false;}
+      });
+      row.appendChild(toggle);row.appendChild(label);row.appendChild(del);list.appendChild(row);
+    });
+  }
+  document.getElementById("generalTaskForm").addEventListener("submit",async function(e){
+    e.preventDefault();var input=document.getElementById("generalTaskInput"),value=input.value.trim();if(!value)return;
+    var button=this.querySelector("button");button.disabled=true;
+    try{await generalTaskRequest("",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({text:value})});input.value="";await loadGeneralTasks();}
+    catch(err){showToast(err.message,true);}finally{button.disabled=false;}
+  });
+  loadGeneralTasks();
 
   /* ---------------- Boot ---------------- */
   Store.subscribe(function(events, mode){
