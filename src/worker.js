@@ -246,7 +246,7 @@ function classifySchoolEmail(subject,snippet) {
   const text=(subject+" "+snippet).toLowerCase();
   // Never surface potentially sensitive health, welfare, or safeguarding mail.
   if(/(hälsa|sjukdom|diagnos|kurator|elevhälsa|psykolog|specialpedagog|mobbn|health|medical|diagnos|counsell|safeguard|socialtjänst|frånvaro|absence)/i.test(text)) return null;
-  const walter=/\\bwalter\\b/i.test(text), ingalill=/\\bingalill\\b/i.test(text);
+  const walter=/\bwalter\b/i.test(text), ingalill=/\bingalill\b/i.test(text);
   const child=walter&&!ingalill?"walter":ingalill&&!walter?"ingalill":"";
   const kind=/(prov|test|exam|tentamen)/i.test(text)?"exam":/(läxa|homework|inlämning|assignment)/i.test(text)?"homework":/(utflykt|aktivitet|activity|excursion|studiedag)/i.test(text)?"activity":/(föräldra|vårdnadshavare|parent|möte|meeting)/i.test(text)?"parent":"other";
   // Dates are intentionally left unconfirmed: snippets may contain several dates,
@@ -308,7 +308,7 @@ async function handleSchoolEmail(request,env,url,action) {
     const title=String(body.title||"").trim().slice(0,160);
     if(!title)throw new ValidationError("Enter a title");
     const date=String(body.date||"");
-    if(date&&!/^\\d{4}-\\d{2}-\\d{2}$/.test(date))throw new ValidationError("Invalid date");
+    if(date&&!/^\d{4}-\d{2}-\d{2}$/.test(date))throw new ValidationError("Invalid date");
     const kind=["exam","homework","activity","parent","other"].includes(body.kind)?body.kind:"other";
     const noticeId=crypto.randomUUID(),eventId=date?crypto.randomUUID():"";
     await ensureSchoolNotices(env.DB);
@@ -390,8 +390,8 @@ async function handlePersonalEmail(request,env,url,action){
     const date=String(body.date||"");
     const time=String(body.time||"");
     if(!title)throw new ValidationError("Enter an event title");
-    if(!/^\\d{4}-\\d{2}-\\d{2}$/.test(date)||Number.isNaN(Date.parse(date+"T12:00:00")))throw new ValidationError("Confirm an event date");
-    if(time&&!/^([01]\\d|2[0-3]):[0-5]\\d$/.test(time))throw new ValidationError("Invalid time");
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(date)||Number.isNaN(Date.parse(date+"T12:00:00")))throw new ValidationError("Confirm an event date");
+    if(time&&!/^([01]\d|2[0-3]):[0-5]\d$/.test(time))throw new ValidationError("Invalid time");
     const claimed=await env.DB.prepare("UPDATE personal_email_suggestions SET review_status='processing' WHERE message_id=? AND review_status='pending'").bind(body.id).run();
     if(!claimed.meta.changes)return json({error:"Already reviewed"},409);
     const eventId=crypto.randomUUID();
