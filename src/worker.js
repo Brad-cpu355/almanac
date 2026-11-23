@@ -144,19 +144,31 @@ async function handleGoogleAuth(request, env, url, action) {
   }
   if (!configured) return json({error:"Gmail credentials are not configured"},503);
   if (action === "start" && request.method === "GET") {
-    await ensureGmailTables(env.DB);
-    const nonce = b64url(crypto.getRandomValues(new Uint8Array(32)));
-    await env.DB.prepare("DELETE FROM gmail_oauth_state WHERE expires_at<?").bind(Date.now()).run();
-    await env.DB.prepare("INSERT INTO gmail_oauth_state (nonce,expires_at) VALUES (?,?)").bind(nonce,Date.now()+600000).run();
-    const params = new URLSearchParams({
-      client_id:env.GMAIL_CLIENT_ID,redirect_uri:GMAIL_REDIRECT,response_type:"code",
-      scope:GMAIL_SCOPE,access_type:"offline",prompt:"consent",state:nonce
-    });
-    return new Response(null,{status:302,headers:{
-      "location":"https://accounts.google.com/o/oauth2/v2/auth?"+params,
-      "set-cookie":"almanac_gmail_state="+nonce+"; Path=/api/auth/google; HttpOnly; Secure; SameSite=Lax; Max-Age=600",
-      "cache-control":"no-store","referrer-policy":"no-referrer"
-    }});
+    // Temporary preview-only diagnostics: disclose only a fixed stage label,
+    // never exception text, SQL parameters, OAuth state, tokens or secrets.
+    let stage = "create_tables";
+    try {
+      await ensureGmailTables(env.DB);
+      stage = "generate_state";
+      const nonce = b64url(crypto.getRandomValues(new Uint8Array(32)));
+      stage = "remove_expired_state";
+      await env.DB.prepare("DELETE FROM gmail_oauth_state WHERE expires_at<?").bind(Date.now()).run();
+      stage = "save_state";
+      await env.DB.prepare("INSERT INTO gmail_oauth_state (nonce,expires_at) VALUES (?,?)").bind(nonce,Date.now()+600000).run();
+      stage = "build_redirect";
+      const params = new URLSearchParams({
+        client_id:env.GMAIL_CLIENT_ID,redirect_uri:GMAIL_REDIRECT,response_type:"code",
+        scope:GMAIL_SCOPE,access_type:"offline",prompt:"consent",state:nonce
+      });
+      return new Response(null,{status:302,headers:{
+        "location":"https://accounts.google.com/o/oauth2/v2/auth?"+params,
+        "set-cookie":"almanac_gmail_state="+nonce+"; Path=/api/auth/google; HttpOnly; Secure; SameSite=Lax; Max-Age=600",
+        "cache-control":"no-store","referrer-policy":"no-referrer"
+      }});
+    } catch (error) {
+      console.error("Gmail OAuth start failed at stage:", stage, error?.name || "Error");
+      return json({error:"Gmail connection could not start",diagnostic_stage:stage},500);
+    }
   }
   if (action === "callback" && request.method === "GET") {
     const clearCookie="almanac_gmail_state=; Path=/api/auth/google; HttpOnly; Secure; SameSite=Lax; Max-Age=0";
