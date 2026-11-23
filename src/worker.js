@@ -260,7 +260,7 @@ function classifySchoolEmail(subject,snippet) {
 function suggestDateTime(subject, snippet, receivedAt) {
   const input=(subject+" "+(snippet||"")).slice(0,600);
   const monthNames={januari:1,februari:2,mars:3,april:4,maj:5,juni:6,juli:7,augusti:8,september:9,oktober:10,november:11,december:12,
-    january:1,february:2,march:3,may:5,june:6,july:7,august:8,october:10,jan:1,feb:2,mar:3,apr:4,jun:6,jul:7,aug:8,sep:9,sept:9,okt:10,oct:10,nov:11,dec:12,december:12};
+    january:1,february:2,march:3,may:5,june:6,july:7,august:8,october:10,jan:1,feb:2,mar:3,apr:4,jun:6,jul:7,aug:8,sep:9,sept:9,okt:10,oct:10,nov:11,dec:12};
   const candidates=[];
   const add=(y,m,d,source)=>{
     y=Number(y);m=Number(m);d=Number(d);
