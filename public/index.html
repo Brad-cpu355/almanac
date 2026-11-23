@@ -783,8 +783,8 @@
       child.value=item.child||"";child.setAttribute("aria-label","Child");box.appendChild(child);
       var title=document.createElement("input");title.value=item.subject;title.maxLength=160;title.setAttribute("aria-label","Calendar title");box.appendChild(title);
       var kind=document.createElement("select");["exam","homework","activity","parent","other"].forEach(function(value){var option=document.createElement("option");option.value=value;option.textContent=value;kind.appendChild(option);});kind.value=item.kind;kind.setAttribute("aria-label","Type");box.appendChild(kind);
-      var date=document.createElement("input");date.type="date";date.setAttribute("aria-label","Event date (optional)");box.appendChild(date);
-      var hint=document.createElement("small");hint.textContent="Verify the date in the original email. Without a date, approval creates a school notice only.";box.appendChild(hint);
+      var date=document.createElement("input");date.type="date";date.value=(item.proposed&&item.proposed.date)||"";date.setAttribute("aria-label","Event date (optional)");box.appendChild(date);
+      var hint=document.createElement("small");hint.textContent=item.proposed&&item.proposed.date?"Suggested date from "+item.proposed.basis+": "+item.proposed.evidence+". Confirm against the email before approving.":item.proposed&&item.proposed.ambiguous?"Multiple possible dates/times found. Enter the correct date manually.":"No unambiguous date detected. Confirm the date in the email; leaving it blank creates a notice only.";box.appendChild(hint);
       var actions=document.createElement("div");actions.style.cssText="display:flex;gap:8px;flex-wrap:wrap";
       var approve=document.createElement("button");approve.type="button";approve.className="btn btn-primary";approve.textContent="Approve";
       var dismiss=document.createElement("button");dismiss.type="button";dismiss.className="btn btn-ghost";dismiss.textContent="Dismiss";
@@ -836,9 +836,9 @@
         var heading=document.createElement("strong");heading.textContent=item.subject;box.appendChild(heading);
         var received=document.createElement("small");received.textContent="Received "+new Date(item.receivedAt).toLocaleDateString();box.appendChild(received);
         var title=document.createElement("input");title.value=item.subject;title.maxLength=160;title.setAttribute("aria-label","Personal event title");box.appendChild(title);
-        var date=document.createElement("input");date.type="date";date.setAttribute("aria-label","Confirmed appointment date");box.appendChild(date);
-        var time=document.createElement("input");time.type="time";time.setAttribute("aria-label","Appointment time (optional)");box.appendChild(time);
-        var note=document.createElement("small");note.textContent="Check the original email and confirm the appointment date and time before approving.";box.appendChild(note);
+        var date=document.createElement("input");date.type="date";date.value=(item.proposed&&item.proposed.date)||"";date.setAttribute("aria-label","Confirmed appointment date");box.appendChild(date);
+        var time=document.createElement("input");time.type="time";time.value=(item.proposed&&item.proposed.time)||"";time.setAttribute("aria-label","Appointment time (optional)");box.appendChild(time);
+        var note=document.createElement("small");note.textContent=item.proposed&&(item.proposed.date||item.proposed.time)?"Proposed from the email subject only. Verify both date and time against the original email before approving.":"No unambiguous appointment date/time in the subject. Check the original email and enter the date and time.";box.appendChild(note);
         var actions=document.createElement("div");actions.style.cssText="display:flex;gap:8px";
         var approve=document.createElement("button");approve.type="button";approve.className="btn btn-primary";approve.textContent="Approve personal event";
         var dismiss=document.createElement("button");dismiss.type="button";dismiss.className="btn btn-ghost";dismiss.textContent="Dismiss";
