@@ -362,8 +362,9 @@
         <p id="gmailStatus" class="hint">Checking Gmail connection…</p>
         <button type="button" class="btn btn-primary" id="gmailConnect" hidden>Connect Gmail</button>
         <button type="button" class="btn btn-ghost" id="gmailDisconnect" hidden>Disconnect Gmail</button>
-        <p class="hint">Read-only Gmail access. Email scanning and importing are not enabled yet. No emails are added automatically.</p>
+        <p class="hint">Read-only Gmail access. Scanning happens only when you click the button. Nothing is added to the calendar without approval.</p>
       </div>
+      <div class="school-card"><h2>School Email Inbox</h2><button type="button" class="btn btn-primary" id="gmailScan">Scan Gmail (last 30 days)</button><p id="gmailScanStatus" class="hint">Review suggested school emails before adding anything.</p><div id="gmailSuggestions"></div></div>
       <div class="school-card"><h2>School notices to check</h2>
         <button type="button" class="btn btn-ghost" id="noticeAddBtn">+ Add notice</button>
         <div id="schoolNotices" style="margin-top:14px"></div>
@@ -746,6 +747,69 @@
     }catch(err){showToast(err.message,true);}
   });
   loadGmailStatus();
+  /* ---------------- Manual school email review ---------------- */
+  var gmailSuggestions=[];
+  var gmailScan=document.getElementById("gmailScan");
+  var gmailScanStatus=document.getElementById("gmailScanStatus");
+  var gmailSuggestionsList=document.getElementById("gmailSuggestions");
+  async function reloadEmailSuggestions(){
+    try{
+      var response=await fetch("/api/school-email/suggestions",{cache:"no-store"});
+      if(!response.ok)throw new Error("Could not load school email suggestions");
+      gmailSuggestions=await response.json();
+      renderEmailSuggestions();
+    }catch(err){gmailScanStatus.textContent=err.message;}
+  }
+  function renderEmailSuggestions(){
+    gmailSuggestionsList.innerHTML="";
+    var pending=gmailSuggestions.filter(function(item){return item.status==="pending";});
+    if(!pending.length){gmailSuggestionsList.textContent="No emails awaiting review.";return;}
+    pending.forEach(function(item){
+      var box=document.createElement("div");
+      box.style.cssText="border-top:1px solid var(--line);padding:16px 0;display:grid;gap:8px";
+      var heading=document.createElement("strong");heading.textContent=item.subject||"(No subject)";box.appendChild(heading);
+      var sender=document.createElement("small");sender.textContent=item.sender+" · "+new Date(item.receivedAt).toLocaleDateString();box.appendChild(sender);
+      var snippet=document.createElement("p");snippet.textContent=item.snippet;box.appendChild(snippet);
+      var child=document.createElement("select");
+      [["","Choose child"],["walter","Walter"],["ingalill","Ingalill"]].forEach(function(pair){var option=document.createElement("option");option.value=pair[0];option.textContent=pair[1];child.appendChild(option);});
+      child.value=item.child||"";child.setAttribute("aria-label","Child");box.appendChild(child);
+      var title=document.createElement("input");title.value=item.subject;title.maxLength=160;title.setAttribute("aria-label","Calendar title");box.appendChild(title);
+      var kind=document.createElement("select");["exam","homework","activity","parent","other"].forEach(function(value){var option=document.createElement("option");option.value=value;option.textContent=value;kind.appendChild(option);});kind.value=item.kind;kind.setAttribute("aria-label","Type");box.appendChild(kind);
+      var date=document.createElement("input");date.type="date";date.setAttribute("aria-label","Event date (optional)");box.appendChild(date);
+      var hint=document.createElement("small");hint.textContent="Verify the date in the original email. Without a date, approval creates a school notice only.";box.appendChild(hint);
+      var actions=document.createElement("div");actions.style.cssText="display:flex;gap:8px;flex-wrap:wrap";
+      var approve=document.createElement("button");approve.type="button";approve.className="btn btn-primary";approve.textContent="Approve";
+      var dismiss=document.createElement("button");dismiss.type="button";dismiss.className="btn btn-ghost";dismiss.textContent="Dismiss";
+      actions.appendChild(approve);actions.appendChild(dismiss);box.appendChild(actions);
+      async function review(decision){
+        if(decision==="approve"&&!child.value){showToast("Choose Walter or Ingalill",true);return;}
+        approve.disabled=true;dismiss.disabled=true;
+        try{
+          var response=await fetch("/api/school-email/review",{method:"POST",headers:{"content-type":"application/json"},
+            body:JSON.stringify({id:item.id,decision:decision,child:child.value,title:title.value,date:date.value,kind:kind.value})});
+          if(!response.ok){var data=await response.json();throw new Error(data.error||"Could not review email");}
+          await reloadEmailSuggestions();
+          if(decision==="approve"){await loadSchoolNotices();await Store.init();}
+          showToast(decision==="approve"?"School entry approved":"Email dismissed");
+        }catch(err){showToast(err.message,true);approve.disabled=false;dismiss.disabled=false;}
+      }
+      approve.addEventListener("click",function(){review("approve");});
+      dismiss.addEventListener("click",function(){review("dismiss");});
+      gmailSuggestionsList.appendChild(box);
+    });
+  }
+  gmailScan.addEventListener("click",async function(){
+    gmailScan.disabled=true;gmailScanStatus.textContent="Scanning school email senders…";
+    try{
+      var response=await fetch("/api/school-email/scan",{method:"POST"});
+      var result=await response.json();
+      if(!response.ok)throw new Error(result.error||"Scan failed");
+      gmailScanStatus.textContent="Checked "+result.checked+" messages; "+result.added+" new suggestions. Review dates and children before approval.";
+      await reloadEmailSuggestions();
+    }catch(err){gmailScanStatus.textContent="Scan failed: "+err.message;}
+    finally{gmailScan.disabled=false;}
+  });
+  reloadEmailSuggestions();
 
   /* ---------------- Editable school notices ---------------- */
   var schoolNotices = [];
