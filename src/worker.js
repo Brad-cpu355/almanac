@@ -37,6 +37,7 @@ export default {
 
 async function handleApi(request, env, url) {
   const segments = url.pathname.split("/").filter(Boolean); // ["api", "events", id?]
+  if (segments[1] === "auth" && segments[2] === "google") return handleGoogleAuth(request, env, url, segments[3]);
   if (segments[1] === "school-notices") return handleSchoolNotices(request, env, segments[2]);
   if (segments[1] !== "events") return json({ error: "Not found" }, 404);
 
@@ -92,6 +93,106 @@ async function handleApi(request, env, url) {
   return json({ error: "Method not allowed" }, 405);
 }
 
+
+
+/* Gmail OAuth is available only on the explicitly named development preview.
+ * Cloudflare Access must protect that hostname, including /api/*.
+ * Never expose OAuth credentials or tokens in JSON responses or logs.
+ */
+const GMAIL_PREVIEW_HOST = "feature-school-family-calendar-almanac.brad11man.workers.dev";
+const GMAIL_REDIRECT = "https://" + GMAIL_PREVIEW_HOST + "/api/auth/google/callback";
+const GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.readonly";
+const encoder = new TextEncoder();
+function b64url(bytes) {
+  let binary = "";
+  for (const b of bytes) binary += String.fromCharCode(b);
+  return btoa(binary).replace(/\\+/g, "-").replace(/\\//g, "_").replace(/=+$/g, "");
+}
+function unb64url(value) {
+  const padded = value.replace(/-/g, "+").replace(/_/g, "/");
+  const raw = atob(padded + "=".repeat((4 - padded.length % 4) % 4));
+  return Uint8Array.from(raw, c => c.charCodeAt(0));
+}
+async function gmailKey(env) {
+  if (!env.GMAIL_TOKEN_KEY) throw new Error("Gmail encryption key not configured");
+  const keyBytes = unb64url(env.GMAIL_TOKEN_KEY);
+  if (keyBytes.length !== 32) throw new Error("Gmail encryption key must contain 32 bytes");
+  return crypto.subtle.importKey("raw", keyBytes, "AES-GCM", false, ["encrypt", "decrypt"]);
+}
+async function encryptGmail(env, value) {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const encrypted = await crypto.subtle.encrypt({name:"AES-GCM",iv}, await gmailKey(env), encoder.encode(value));
+  return b64url(iv) + "." + b64url(new Uint8Array(encrypted));
+}
+async function ensureGmailTables(db) {
+  await db.prepare("CREATE TABLE IF NOT EXISTS gmail_oauth_state (nonce TEXT PRIMARY KEY, expires_at INTEGER NOT NULL)").run();
+  await db.prepare("CREATE TABLE IF NOT EXISTS gmail_connection (id INTEGER PRIMARY KEY CHECK (id=1), encrypted_token TEXT NOT NULL, connected_at INTEGER NOT NULL)").run();
+}
+function gmailHtml(message, ok) {
+  const safe = message.replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+  return new Response('<!doctype html><html lang="en"><meta charset="utf-8"><title>Almanac Gmail</title><body style="font-family:sans-serif;max-width:36rem;margin:4rem auto"><h1>Almanac Gmail</h1><p>'+safe+'</p><p><a href="/">Return to Almanac</a></p></body></html>', {status:ok?200:400,headers:{"content-type":"text/html; charset=utf-8","cache-control":"no-store","referrer-policy":"no-referrer"}});
+}
+async function handleGoogleAuth(request, env, url, action) {
+  if (url.hostname !== GMAIL_PREVIEW_HOST || url.protocol !== "https:") return json({error:"Not available on this deployment"},404);
+  if (!["GET","POST"].includes(request.method)) return json({error:"Method not allowed"},405);
+  const configured = !!(env.GMAIL_CLIENT_ID && env.GMAIL_CLIENT_SECRET && env.GMAIL_TOKEN_KEY);
+  if (action === "status" && request.method === "GET") {
+    if (!configured) return json({configured:false,connected:false});
+    await ensureGmailTables(env.DB);
+    const record = await env.DB.prepare("SELECT connected_at FROM gmail_connection WHERE id=1").first();
+    return json({configured:true,connected:!!record,connectedAt:record?.connected_at||null});
+  }
+  if (!configured) return json({error:"Gmail credentials are not configured"},503);
+  if (action === "start" && request.method === "GET") {
+    await ensureGmailTables(env.DB);
+    const nonce = b64url(crypto.getRandomValues(new Uint8Array(32)));
+    await env.DB.prepare("DELETE FROM gmail_oauth_state WHERE expires_at<?").bind(Date.now()).run();
+    await env.DB.prepare("INSERT INTO gmail_oauth_state (nonce,expires_at) VALUES (?,?)").bind(nonce,Date.now()+600000).run();
+    const params = new URLSearchParams({
+      client_id:env.GMAIL_CLIENT_ID,redirect_uri:GMAIL_REDIRECT,response_type:"code",
+      scope:GMAIL_SCOPE,access_type:"offline",prompt:"consent",state:nonce
+    });
+    return new Response(null,{status:302,headers:{
+      "location":"https://accounts.google.com/o/oauth2/v2/auth?"+params,
+      "set-cookie":"almanac_gmail_state="+nonce+"; Path=/api/auth/google; HttpOnly; Secure; SameSite=Lax; Max-Age=600",
+      "cache-control":"no-store","referrer-policy":"no-referrer"
+    }});
+  }
+  if (action === "callback" && request.method === "GET") {
+    const clearCookie="almanac_gmail_state=; Path=/api/auth/google; HttpOnly; Secure; SameSite=Lax; Max-Age=0";
+    const fail=(message)=>{const response=gmailHtml(message,false);response.headers.set("set-cookie",clearCookie);return response;};
+    if (url.searchParams.has("error")) return fail("Google did not authorise the connection.");
+    const state=url.searchParams.get("state")||"";
+    const cookie=(request.headers.get("cookie")||"").split(";").map(v=>v.trim()).find(v=>v.startsWith("almanac_gmail_state="));
+    if (!state || !cookie || cookie.slice("almanac_gmail_state=".length)!==state) return fail("The sign-in session expired or did not match. Please try again.");
+    await ensureGmailTables(env.DB);
+    const saved=await env.DB.prepare("SELECT expires_at FROM gmail_oauth_state WHERE nonce=?").bind(state).first();
+    if (!saved || saved.expires_at<Date.now()) return fail("The sign-in session expired. Please try again.");
+    await env.DB.prepare("DELETE FROM gmail_oauth_state WHERE nonce=?").bind(state).run();
+    const code=url.searchParams.get("code");
+    if (!code) return fail("Google did not return an authorisation code.");
+    const tokenResponse=await fetch("https://oauth2.googleapis.com/token",{
+      method:"POST",headers:{"content-type":"application/x-www-form-urlencoded"},
+      body:new URLSearchParams({code,client_id:env.GMAIL_CLIENT_ID,client_secret:env.GMAIL_CLIENT_SECRET,redirect_uri:GMAIL_REDIRECT,grant_type:"authorization_code"})
+    });
+    if (!tokenResponse.ok) return fail("Google could not complete the connection. Check the OAuth configuration.");
+    const token=await tokenResponse.json();
+    if (!token.refresh_token) return fail("Google did not provide an offline refresh token. Please retry the connection.");
+    const encrypted=await encryptGmail(env,JSON.stringify({refresh_token:token.refresh_token,scope:token.scope||"",token_type:token.token_type||""}));
+    await env.DB.prepare("INSERT INTO gmail_connection (id,encrypted_token,connected_at) VALUES (1,?,?) ON CONFLICT(id) DO UPDATE SET encrypted_token=excluded.encrypted_token,connected_at=excluded.connected_at").bind(encrypted,Date.now()).run();
+    const response=gmailHtml("Gmail connected with read-only permission. No messages have been imported.",true);
+    response.headers.set("set-cookie",clearCookie);
+    return response;
+  }
+  if (action === "disconnect" && request.method === "POST") {
+    if (request.headers.get("origin") !== "https://"+GMAIL_PREVIEW_HOST) return json({error:"Invalid request origin"},403);
+    await ensureGmailTables(env.DB);
+    // Disconnect locally; revoke Google access separately in Google Account settings if desired.
+    await env.DB.prepare("DELETE FROM gmail_connection WHERE id=1").run();
+    return json({connected:false});
+  }
+  return json({error:"Not found"},404);
+}
 
 const NOTICE_CHILDREN = new Set(["walter", "ingalill"]);
 const NOTICE_STATUSES = new Set(["action", "upcoming", "completed"]);
