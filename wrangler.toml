@@ -15,9 +15,6 @@ database_name = "almanac-db"
 database_id = "0ccee185-278b-482c-a17b-5e53f8735a30"
 
 # Preview configuration
-[previews]
-enabled = true
-
 [[previews.d1_databases]]
 binding = "DB"
 database_name = "almanac-preview-db"
