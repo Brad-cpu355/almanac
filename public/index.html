@@ -344,6 +344,7 @@
         <p><button type="button" class="btn btn-ghost" id="reviewSchoolJump">School: <strong id="reviewSchoolCount">…</strong> →</button> <button type="button" class="btn btn-ghost" id="reviewPersonalJump">Personal: <strong id="reviewPersonalCount">…</strong> →</button></p>
         <p class="hint" id="reviewScanHint">Counts reflect emails already scanned, not your live Gmail inbox.</p>
       </section>
+      <section class="school-card" id="agendaTasks" aria-label="School actions requiring attention"><h2>☑ School actions <span id="agendaTaskCount">…</span></h2><div id="agendaTaskList"><p class="hint">Loading school actions…</p></div></section>
       <div id="agendaContent"></div>
     </section>
 
@@ -1025,6 +1026,33 @@
       console.error(err);
     }
     refreshCalendar();
+    renderAgendaTasks();
+  }
+  function renderAgendaTasks(){
+    var list=document.getElementById("agendaTaskList"),count=document.getElementById("agendaTaskCount");
+    if(!list)return;
+    list.replaceChildren();
+    if(noticeLoadError){count.textContent="—";list.textContent=noticeLoadError;return;}
+    var tasks=schoolNotices.filter(function(n){return n.status==="action";});
+    count.textContent=String(tasks.length);
+    if(!tasks.length){var empty=document.createElement("p");empty.className="hint";empty.textContent="No outstanding school actions.";list.appendChild(empty);return;}
+    tasks.sort(function(a,b){return (a.dueDate||"9999").localeCompare(b.dueDate||"9999");});
+    tasks.forEach(function(n){
+      var row=document.createElement("div");row.style.cssText="border-top:1px solid var(--line);padding:12px 0;display:grid;gap:6px";
+      var title=document.createElement("strong");title.textContent="☐ "+n.title;row.appendChild(title);
+      var meta=document.createElement("small");meta.textContent=(n.child==="walter"?"Walter":"Ingalill")+" · School"+(n.dueDate?" · Due "+n.dueDate:" · No deadline specified");row.appendChild(meta);
+      var buttons=document.createElement("div");buttons.style.cssText="display:flex;gap:8px;flex-wrap:wrap";
+      var done=document.createElement("button");done.type="button";done.className="btn btn-primary";done.textContent="Mark completed";
+      done.addEventListener("click",async function(){
+        done.disabled=true;
+        try{
+          await saveNotice(n.id,{child:n.child,title:n.title,details:n.details,status:"completed",dueDate:n.dueDate||"",linkedEventId:n.linkedEventId||"",recordType:n.recordType||"other",source:n.source||"manual"});
+          showToast("Action completed");
+        }catch(err){showToast(err.message,true);done.disabled=false;}
+      });
+      var edit=document.createElement("button");edit.type="button";edit.className="btn btn-ghost";edit.textContent="View / edit";edit.addEventListener("click",function(){openNotice(n);});
+      buttons.appendChild(done);buttons.appendChild(edit);row.appendChild(buttons);list.appendChild(row);
+    });
   }
   function renderNotices(){
     el.schoolNotices.innerHTML = "";
