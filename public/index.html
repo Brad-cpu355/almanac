@@ -842,6 +842,42 @@
       var kind=document.createElement("select");["exam","homework","activity","parent","other"].forEach(function(value){var option=document.createElement("option");option.value=value;option.textContent=value;kind.appendChild(option);});kind.value=item.kind;kind.setAttribute("aria-label","Type");box.appendChild(kind);
       var date=document.createElement("input");date.type="date";date.value=(item.proposed&&item.proposed.date)||"";date.setAttribute("aria-label","Event date (optional)");box.appendChild(date);
       var hint=document.createElement("small");hint.textContent=item.proposed&&item.proposed.date?"Suggested date ("+(item.proposed.confidence||"high")+" confidence) from "+item.proposed.basis+": "+item.proposed.evidence+". "+(item.proposed.allDay?"All-day event detected (00:00–23:59). ":"")+"Confirm against the email before approving.":item.proposed&&item.proposed.ambiguous?"Ambiguous date expression or multiple possible dates. Enter the correct date manually.":"No unambiguous date detected. Confirm the date in the email; leaving it blank creates a notice only.";box.appendChild(hint);
+      var findActions=document.createElement("button");findActions.type="button";findActions.className="btn btn-ghost";findActions.textContent="Find actions & links";
+      var actionPanel=document.createElement("div");actionPanel.className="school-card";actionPanel.hidden=true;
+      box.appendChild(findActions);box.appendChild(actionPanel);
+      findActions.addEventListener("click",async function(){
+        findActions.disabled=true;findActions.textContent="Analysing…";actionPanel.hidden=false;actionPanel.replaceChildren();
+        function info(label,value){var p=document.createElement("p");var strong=document.createElement("strong");strong.textContent=label+": ";p.appendChild(strong);p.appendChild(document.createTextNode(value));actionPanel.appendChild(p);}
+        try{
+          var response=await fetch("/api/school-email/actions",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({id:item.id})});
+          var result=await response.json();
+          if(!response.ok)throw new Error(result.error||"Action analysis unavailable");
+          info("Suggested actions",result.actions.length?result.actions.join(" • "):"No clear action recognised. Check the original email.");
+          if(result.proposed.date)info("Suggested date",result.proposed.date+(result.proposed.time?" at "+result.proposed.time:""));
+          if(result.proposed.ambiguous)info("Dates","Date or time may be ambiguous; check the email.");
+          if(result.links.length){
+            info("Links","These are unverified external destinations. Check the domain before opening.");
+            result.links.forEach(function(link){
+              var p=document.createElement("p"),a=document.createElement("a");
+              a.href=link.url;a.target="_blank";a.rel="noopener noreferrer";
+              a.textContent=(link.label||"Open link")+" ↗ ("+link.host+")";
+              p.appendChild(a);actionPanel.appendChild(p);
+            });
+          }else info("Links","No accessible links found. Open original Gmail to check.");
+          if(result.attachments.length)info("Attachments",result.attachments.join(", ")+" — open in Gmail");
+          info("Note",result.note);
+          if(result.suggestedTitle){
+            var use=document.createElement("button");use.type="button";use.className="btn btn-ghost";use.textContent="Use suggested task title";
+            use.addEventListener("click",function(){title.value=result.suggestedTitle;kind.value="other";date.value="";});
+            actionPanel.appendChild(use);
+          }
+          if(result.proposed.date){
+            var apply=document.createElement("button");apply.type="button";apply.className="btn btn-ghost";apply.textContent="Use suggested date";
+            apply.addEventListener("click",function(){date.value=result.proposed.date;});actionPanel.appendChild(apply);
+          }
+        }catch(err){info("Error",err.message);}
+        finally{findActions.disabled=false;findActions.textContent="Find actions & links";}
+      });
       var translate=document.createElement("button");translate.type="button";translate.className="btn btn-ghost";translate.textContent="Summarise in English";
       var translation=document.createElement("div");translation.className="school-card";translation.hidden=true;
       box.appendChild(translate);box.appendChild(translation);
@@ -880,7 +916,7 @@
         finally{analyze.disabled=false;}
       });
       var actions=document.createElement("div");actions.style.cssText="display:flex;gap:8px;flex-wrap:wrap";
-      var approve=document.createElement("button");approve.type="button";approve.className="btn btn-primary";approve.textContent="Approve";
+      var approve=document.createElement("button");approve.type="button";approve.className="btn btn-primary";approve.textContent="Add task / event";
       var dismiss=document.createElement("button");dismiss.type="button";dismiss.className="btn btn-ghost";dismiss.textContent="Dismiss";
       actions.appendChild(approve);actions.appendChild(dismiss);box.appendChild(actions);
       async function review(decision){
