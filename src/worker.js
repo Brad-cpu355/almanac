@@ -41,6 +41,7 @@ async function handleApi(request, env, url) {
   if (segments[1] === "personal-email") return handlePersonalEmail(request, env, url, segments[2]);
   if (segments[1] === "school-email") return handleSchoolEmail(request, env, url, segments[2]);
   if (segments[1] === "school-notices") return handleSchoolNotices(request, env, segments[2]);
+  if (segments[1] === "tasks") return handleTasks(request, env, segments[2]);
   if (segments[1] !== "events") return json({ error: "Not found" }, 404);
 
   const id = segments[2];
@@ -96,6 +97,33 @@ async function handleApi(request, env, url) {
 }
 
 
+
+
+async function handleTasks(request, env, id) {
+  if (request.method === "GET" && !id) {
+    const {results}=await env.DB.prepare("SELECT * FROM tasks ORDER BY done ASC, created_at DESC").all();
+    return json(results.map(r=>({id:r.id,text:r.text,done:!!r.done,createdAt:r.created_at,completedAt:r.completed_at})));
+  }
+  if (request.method === "POST" && !id) {
+    const body=await request.json().catch(()=>({}));
+    const value=typeof body.text==="string"?body.text.trim():"";
+    if (!value || value.length>500) throw new ValidationError("Task must contain 1–500 characters");
+    const taskId=crypto.randomUUID(), now=Date.now();
+    await env.DB.prepare("INSERT INTO tasks (id,text,done,created_at,completed_at) VALUES (?,?,0,?,NULL)").bind(taskId,value,now).run();
+    return json({id:taskId,text:value,done:false,createdAt:now,completedAt:null},201);
+  }
+  if (request.method === "PUT" && id) {
+    const body=await request.json().catch(()=>({}));
+    if (typeof body.done!=="boolean") throw new ValidationError("done must be boolean");
+    const result=await env.DB.prepare("UPDATE tasks SET done=?,completed_at=? WHERE id=?").bind(body.done?1:0,body.done?Date.now():null,id).run();
+    return result.meta.changes?json({id,done:body.done}):json({error:"Task not found"},404);
+  }
+  if (request.method === "DELETE" && id) {
+    const result=await env.DB.prepare("DELETE FROM tasks WHERE id=?").bind(id).run();
+    return result.meta.changes?new Response(null,{status:204}):json({error:"Task not found"},404);
+  }
+  return json({error:"Method not allowed"},405);
+}
 
 /* Gmail OAuth is limited to the explicitly allowed development and production hosts.
  * Cloudflare Access must protect both hostnames, including /api/*.
