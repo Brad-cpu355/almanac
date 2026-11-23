@@ -357,6 +357,13 @@
         <button type="button" class="btn btn-primary" id="schoolTabAdd">+ Add school event</button>
       </div>
       <div id="schoolUpcoming"></div>
+      <div class="school-card">
+        <h2>Gmail connection</h2>
+        <p id="gmailStatus" class="hint">Checking Gmail connection…</p>
+        <button type="button" class="btn btn-primary" id="gmailConnect" hidden>Connect Gmail</button>
+        <button type="button" class="btn btn-ghost" id="gmailDisconnect" hidden>Disconnect Gmail</button>
+        <p class="hint">Read-only Gmail access. Email scanning and importing are not enabled yet. No emails are added automatically.</p>
+      </div>
       <div class="school-card"><h2>School notices to check</h2>
         <button type="button" class="btn btn-ghost" id="noticeAddBtn">+ Add notice</button>
         <div id="schoolNotices" style="margin-top:14px"></div>
@@ -708,6 +715,37 @@
     if(v==="year") renderYear();
   }
   el.segButtons.forEach(function(b){ b.addEventListener("click", function(){ setView(b.dataset.view); }); });
+
+  /* ---------------- Gmail connection (development preview only) ---------------- */
+  async function loadGmailStatus(){
+    var label=document.getElementById("gmailStatus");
+    var connect=document.getElementById("gmailConnect");
+    var disconnect=document.getElementById("gmailDisconnect");
+    try{
+      var response=await fetch("/api/auth/google/status",{cache:"no-store"});
+      if(!response.ok) throw new Error("Connection status unavailable");
+      var status=await response.json();
+      label.textContent=status.connected?"Gmail connected (read-only).":status.configured?"Gmail is not connected.":"Gmail setup is incomplete. Configure Cloudflare secrets first.";
+      connect.hidden=!status.configured||status.connected;
+      disconnect.hidden=!status.connected;
+    }catch(err){
+      label.textContent="Gmail connection status unavailable.";
+      connect.hidden=true;disconnect.hidden=true;
+    }
+  }
+  document.getElementById("gmailConnect").addEventListener("click",function(){
+    window.location.assign("/api/auth/google/start");
+  });
+  document.getElementById("gmailDisconnect").addEventListener("click",async function(){
+    if(!confirm("Disconnect Gmail from Almanac? This removes the saved connection."))return;
+    try{
+      var response=await fetch("/api/auth/google/disconnect",{method:"POST"});
+      if(!response.ok)throw new Error("Could not disconnect Gmail");
+      await loadGmailStatus();
+      showToast("Gmail disconnected");
+    }catch(err){showToast(err.message,true);}
+  });
+  loadGmailStatus();
 
   /* ---------------- Editable school notices ---------------- */
   var schoolNotices = [];
