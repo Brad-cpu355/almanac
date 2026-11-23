@@ -371,6 +371,13 @@
         <p class="hint">Reference notes only. Gmail/Unikum syncing is not enabled.</p>
       </div>
     </section>
+      <div class="school-card" id="personalEmailCard">
+        <h2>Personal Email Inbox</h2>
+        <p class="hint">Private review for messages from Maria Rosenqvist only. Scanning is manual; only email subjects and dates are stored. No email bodies are imported.</p>
+        <button type="button" class="btn btn-primary" id="personalScan">Scan personal emails (last 30 days)</button>
+        <p id="personalScanStatus" class="hint">Nothing is added without your approval.</p>
+        <div id="personalSuggestions"></div>
+      </div>
     <section class="view" id="view-year">
       <div class="year-nav">
         <button type="button" class="btn-icon" id="yearPrev" aria-label="Previous year">
@@ -810,6 +817,62 @@
     finally{gmailScan.disabled=false;}
   });
   reloadEmailSuggestions();
+
+  /* ---------------- Personal email inbox ---------------- */
+  var personalScan=document.getElementById("personalScan");
+  var personalStatus=document.getElementById("personalScanStatus");
+  var personalList=document.getElementById("personalSuggestions");
+  async function reloadPersonalEmails(){
+    try{
+      var response=await fetch("/api/personal-email/suggestions",{cache:"no-store"});
+      if(!response.ok)throw new Error("Could not load personal email suggestions");
+      var items=await response.json();
+      personalList.innerHTML="";
+      var pending=items.filter(function(item){return item.status==="pending";});
+      if(!pending.length){personalList.textContent="No personal emails awaiting review.";return;}
+      pending.forEach(function(item){
+        var box=document.createElement("div");box.style.cssText="border-top:1px solid var(--line);padding:14px 0;display:grid;gap:8px";
+        var heading=document.createElement("strong");heading.textContent=item.subject;box.appendChild(heading);
+        var received=document.createElement("small");received.textContent="Received "+new Date(item.receivedAt).toLocaleDateString();box.appendChild(received);
+        var title=document.createElement("input");title.value=item.subject;title.maxLength=160;title.setAttribute("aria-label","Personal event title");box.appendChild(title);
+        var date=document.createElement("input");date.type="date";date.setAttribute("aria-label","Confirmed appointment date");box.appendChild(date);
+        var time=document.createElement("input");time.type="time";time.setAttribute("aria-label","Appointment time (optional)");box.appendChild(time);
+        var note=document.createElement("small");note.textContent="Check the original email and confirm the appointment date and time before approving.";box.appendChild(note);
+        var actions=document.createElement("div");actions.style.cssText="display:flex;gap:8px";
+        var approve=document.createElement("button");approve.type="button";approve.className="btn btn-primary";approve.textContent="Approve personal event";
+        var dismiss=document.createElement("button");dismiss.type="button";dismiss.className="btn btn-ghost";dismiss.textContent="Dismiss";
+        actions.appendChild(approve);actions.appendChild(dismiss);box.appendChild(actions);
+        async function review(decision){
+          if(decision==="approve"&&!date.value){showToast("Confirm the appointment date",true);return;}
+          approve.disabled=true;dismiss.disabled=true;
+          try{
+            var response=await fetch("/api/personal-email/review",{method:"POST",headers:{"content-type":"application/json"},
+              body:JSON.stringify({id:item.id,decision:decision,title:title.value,date:date.value,time:time.value})});
+            var result=await response.json();
+            if(!response.ok)throw new Error(result.error||"Could not review email");
+            await reloadPersonalEmails();
+            if(decision==="approve")await Store.init();
+            showToast(decision==="approve"?"Personal event added":"Email dismissed");
+          }catch(err){showToast(err.message,true);approve.disabled=false;dismiss.disabled=false;}
+        }
+        approve.addEventListener("click",function(){review("approve");});
+        dismiss.addEventListener("click",function(){review("dismiss");});
+        personalList.appendChild(box);
+      });
+    }catch(err){personalStatus.textContent=err.message;}
+  }
+  personalScan.addEventListener("click",async function(){
+    personalScan.disabled=true;personalStatus.textContent="Scanning selected sender…";
+    try{
+      var response=await fetch("/api/personal-email/scan",{method:"POST"});
+      var result=await response.json();
+      if(!response.ok)throw new Error(result.error||"Scan failed");
+      personalStatus.textContent="Checked "+result.checked+" messages; "+result.added+" new suggestions.";
+      await reloadPersonalEmails();
+    }catch(err){personalStatus.textContent="Scan failed: "+err.message;}
+    finally{personalScan.disabled=false;}
+  });
+  reloadPersonalEmails();
 
   /* ---------------- Editable school notices ---------------- */
   var schoolNotices = [];
