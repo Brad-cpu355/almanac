@@ -785,6 +785,22 @@
       var kind=document.createElement("select");["exam","homework","activity","parent","other"].forEach(function(value){var option=document.createElement("option");option.value=value;option.textContent=value;kind.appendChild(option);});kind.value=item.kind;kind.setAttribute("aria-label","Type");box.appendChild(kind);
       var date=document.createElement("input");date.type="date";date.value=(item.proposed&&item.proposed.date)||"";date.setAttribute("aria-label","Event date (optional)");box.appendChild(date);
       var hint=document.createElement("small");hint.textContent=item.proposed&&item.proposed.date?"Suggested date ("+(item.proposed.confidence||"high")+" confidence) from "+item.proposed.basis+": "+item.proposed.evidence+". "+(item.proposed.allDay?"All-day event detected (00:00–23:59). ":"")+"Confirm against the email before approving.":item.proposed&&item.proposed.ambiguous?"Ambiguous date expression or multiple possible dates. Enter the correct date manually.":"No unambiguous date detected. Confirm the date in the email; leaving it blank creates a notice only.";box.appendChild(hint);
+      var analyze=document.createElement("button");analyze.type="button";analyze.className="btn btn-ghost";analyze.textContent="Find date in email";
+      var analysisNote=document.createElement("small");analysisNote.textContent="Optional: reads this school email's text once to suggest a date. Its body is not saved.";
+      box.appendChild(analyze);box.appendChild(analysisNote);
+      analyze.addEventListener("click",async function(){
+        analyze.disabled=true;analysisNote.textContent="Checking selected email…";
+        try{
+          var response=await fetch("/api/school-email/analyze",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({id:item.id})});
+          var result=await response.json();
+          if(!response.ok)throw new Error(result.error||"Analysis unavailable");
+          if(!result.found){analysisNote.textContent=result.message||"No date or time found in this email.";return;}
+          var p=result.proposed;
+          if(p.date)date.value=p.date;
+          analysisNote.textContent=(p.ambiguous?"Ambiguous — verify manually. ":"")+(p.date?"Suggested date: "+p.date+". ":"")+(p.time?"Time: "+p.time+". ":"")+(p.allDay?"All-day event. ":"")+"From selected email body; confirm against the original before approval.";
+        }catch(err){analysisNote.textContent=err.message;}
+        finally{analyze.disabled=false;}
+      });
       var actions=document.createElement("div");actions.style.cssText="display:flex;gap:8px;flex-wrap:wrap";
       var approve=document.createElement("button");approve.type="button";approve.className="btn btn-primary";approve.textContent="Approve";
       var dismiss=document.createElement("button");dismiss.type="button";dismiss.className="btn btn-ghost";dismiss.textContent="Dismiss";
