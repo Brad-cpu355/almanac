@@ -777,6 +777,17 @@
       renderEmailSuggestions();
     }catch(err){gmailScanStatus.textContent=err.message;}
   }
+  function gmailMessageLink(id){
+    if(typeof id!=="string"||!/^[a-zA-Z0-9_-]{8,100}$/.test(id))return null;
+    return "https://mail.google.com/mail/u/0/#all/"+encodeURIComponent(id);
+  }
+  function appendGmailLink(box,id){
+    var url=gmailMessageLink(id);
+    if(!url)return;
+    var a=document.createElement("a");a.href=url;a.target="_blank";a.rel="noopener noreferrer";
+    a.textContent="Open original in Gmail ↗";a.setAttribute("aria-label","Open original email in Gmail (new tab)");
+    box.appendChild(a);
+  }
   function renderEmailSuggestions(){
     gmailSuggestionsList.innerHTML="";
     var pending=gmailSuggestions.filter(function(item){return item.status==="pending";});
@@ -786,6 +797,7 @@
       box.style.cssText="border-top:1px solid var(--line);padding:16px 0;display:grid;gap:8px";
       var heading=document.createElement("strong");heading.textContent=item.subject||"(No subject)";box.appendChild(heading);
       var sender=document.createElement("small");sender.textContent=item.sender+" · "+new Date(item.receivedAt).toLocaleDateString();box.appendChild(sender);
+      appendGmailLink(box,item.id);
       var snippet=document.createElement("p");snippet.textContent=item.snippet;box.appendChild(snippet);
       var child=document.createElement("select");
       [["","Choose child"],["walter","Walter"],["ingalill","Ingalill"]].forEach(function(pair){var option=document.createElement("option");option.value=pair[0];option.textContent=pair[1];child.appendChild(option);});
@@ -881,6 +893,7 @@
         var box=document.createElement("div");box.style.cssText="border-top:1px solid var(--line);padding:14px 0;display:grid;gap:8px";
         var heading=document.createElement("strong");heading.textContent=item.subject;box.appendChild(heading);
         var received=document.createElement("small");received.textContent="Received "+new Date(item.receivedAt).toLocaleDateString();box.appendChild(received);
+        appendGmailLink(box,item.id);
         var title=document.createElement("input");title.value=item.subject;title.maxLength=160;title.setAttribute("aria-label","Personal event title");box.appendChild(title);
         var date=document.createElement("input");date.type="date";date.value=(item.proposed&&item.proposed.date)||"";date.setAttribute("aria-label","Confirmed appointment date");box.appendChild(date);
         var time=document.createElement("input");time.type="time";time.value=(item.proposed&&item.proposed.time)||"";time.setAttribute("aria-label","Appointment time (optional)");box.appendChild(time);
