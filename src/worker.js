@@ -38,6 +38,7 @@ export default {
 async function handleApi(request, env, url) {
   const segments = url.pathname.split("/").filter(Boolean); // ["api", "events", id?]
   if (segments[1] === "auth" && segments[2] === "google") return handleGoogleAuth(request, env, url, segments[3]);
+  if (segments[1] === "personal-email") return handlePersonalEmail(request, env, url, segments[2]);
   if (segments[1] === "school-email") return handleSchoolEmail(request, env, url, segments[2]);
   if (segments[1] === "school-notices") return handleSchoolNotices(request, env, segments[2]);
   if (segments[1] !== "events") return json({ error: "Not found" }, 404);
@@ -264,12 +265,12 @@ async function handleSchoolEmail(request,env,url,action) {
   await ensureSchoolEmail(env.DB);
   if(action==="suggestions" && request.method==="GET"){
     const {results}=await env.DB.prepare("SELECT * FROM school_email_suggestions ORDER BY received_at DESC LIMIT 100").all();
-    return json(results.map(schoolEmailRow));
+    return json(results.filter(r=>!r.sender.toLowerCase().includes("maria.rosenqvist@malmo.se")).map(schoolEmailRow));
   }
   if(action==="scan" && request.method==="POST"){
     const token=await gmailAccessToken(env);
     // Explicitly limit the query to school-service senders, not the full inbox.
-    const query='newer_than:30d {from:(unikum.net) from:(malmo.se) from:(malmö.se)}';
+    const query='newer_than:30d {from:(unikum.net) from:(malmo.se) from:(malmö.se)} -from:maria.rosenqvist@malmo.se';
     const list=await gmailRequest(token,"messages?"+new URLSearchParams({q:query,maxResults:"40"}));
     let added=0,skipped=0;
     for(const item of list.messages||[]){
@@ -280,6 +281,7 @@ async function handleSchoolEmail(request,env,url,action) {
       const subject=(headers.find(h=>h.name.toLowerCase()==="subject")?.value||"").slice(0,160);
       const sender=(headers.find(h=>h.name.toLowerCase()==="from")?.value||"").slice(0,200);
       const snippet=(message.snippet||"").slice(0,300);
+      if(sender.toLowerCase().includes("maria.rosenqvist@malmo.se")){skipped++;continue;}
       const classified=classifySchoolEmail(subject,snippet);
       if(!classified){skipped++;continue;}
       await env.DB.prepare(`INSERT OR IGNORE INTO school_email_suggestions
@@ -295,6 +297,7 @@ async function handleSchoolEmail(request,env,url,action) {
     if(typeof body.id!=="string"||body.id.length>200)throw new ValidationError("Invalid suggestion");
     const row=await env.DB.prepare("SELECT * FROM school_email_suggestions WHERE message_id=?").bind(body.id).first();
     if(!row) return json({error:"Suggestion not found"},404);
+    if(row.sender.toLowerCase().includes("maria.rosenqvist@malmo.se"))return json({error:"Use Personal Email Inbox for this sender"},403);
     if(row.review_status!=="pending")return json({error:"Already reviewed"},409);
     if(body.decision==="dismiss"){
       await env.DB.prepare("UPDATE school_email_suggestions SET review_status='dismissed' WHERE message_id=? AND review_status='pending'").bind(body.id).run();
@@ -327,6 +330,80 @@ async function handleSchoolEmail(request,env,url,action) {
     }catch(e){
       await env.DB.prepare("UPDATE school_email_suggestions SET review_status='pending' WHERE message_id=? AND review_status='processing'").bind(body.id).run();
       throw e;
+    }
+  }
+  return json({error:"Not found"},404);
+}
+
+
+/* Personal email review is opt-in, sender-specific, and metadata-only.
+ * No message body, snippet or attachment is fetched or stored.
+ */
+const PERSONAL_SENDER="maria.rosenqvist@malmo.se";
+async function ensurePersonalEmail(db){
+  await db.prepare(`CREATE TABLE IF NOT EXISTS personal_email_suggestions (
+    message_id TEXT PRIMARY KEY, subject TEXT NOT NULL, received_at INTEGER NOT NULL,
+    review_status TEXT NOT NULL DEFAULT 'pending', event_id TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL
+  )`).run();
+}
+async function handlePersonalEmail(request,env,url,action){
+  if(url.hostname!==GMAIL_PREVIEW_HOST||url.protocol!=="https:")return json({error:"Not available"},404);
+  if(request.method!=="GET" && request.headers.get("origin")!=="https://"+GMAIL_PREVIEW_HOST)
+    return json({error:"Invalid request origin"},403);
+  await ensurePersonalEmail(env.DB);
+  if(action==="suggestions" && request.method==="GET"){
+    const {results}=await env.DB.prepare("SELECT message_id,subject,received_at,review_status FROM personal_email_suggestions ORDER BY received_at DESC LIMIT 100").all();
+    return json(results.map(r=>({id:r.message_id,subject:r.subject,receivedAt:r.received_at,status:r.review_status})));
+  }
+  if(action==="scan" && request.method==="POST"){
+    const token=await gmailAccessToken(env);
+    const query="newer_than:30d from:"+PERSONAL_SENDER;
+    const list=await gmailRequest(token,"messages?"+new URLSearchParams({q:query,maxResults:"40"}));
+    let added=0,skipped=0;
+    for(const item of list.messages||[]){
+      const existing=await env.DB.prepare("SELECT message_id FROM personal_email_suggestions WHERE message_id=?").bind(item.id).first();
+      if(existing){skipped++;continue;}
+      const message=await gmailRequest(token,"messages/"+encodeURIComponent(item.id)+"?format=metadata&metadataHeaders=Subject&metadataHeaders=From");
+      const headers=message.payload?.headers||[];
+      const sender=(headers.find(h=>h.name.toLowerCase()==="from")?.value||"").toLowerCase();
+      if(!sender.includes(PERSONAL_SENDER)){skipped++;continue;}
+      const subject=(headers.find(h=>h.name.toLowerCase()==="subject")?.value||"(No subject)").slice(0,160);
+      await env.DB.prepare("INSERT OR IGNORE INTO personal_email_suggestions (message_id,subject,received_at,created_at) VALUES (?,?,?,?)")
+        .bind(item.id,subject,Number(message.internalDate)||Date.now(),Date.now()).run();
+      added++;
+    }
+    return json({added,skipped,checked:(list.messages||[]).length});
+  }
+  if(action==="review" && request.method==="POST"){
+    const body=await request.json();
+    if(typeof body.id!=="string"||body.id.length>200)throw new ValidationError("Invalid suggestion");
+    const row=await env.DB.prepare("SELECT review_status FROM personal_email_suggestions WHERE message_id=?").bind(body.id).first();
+    if(!row)return json({error:"Suggestion not found"},404);
+    if(row.review_status!=="pending")return json({error:"Already reviewed"},409);
+    if(body.decision==="dismiss"){
+      await env.DB.prepare("UPDATE personal_email_suggestions SET review_status='dismissed' WHERE message_id=? AND review_status='pending'").bind(body.id).run();
+      return json({status:"dismissed"});
+    }
+    if(body.decision!=="approve")throw new ValidationError("Invalid decision");
+    const title=String(body.title||"").trim().slice(0,160);
+    const date=String(body.date||"");
+    const time=String(body.time||"");
+    if(!title)throw new ValidationError("Enter an event title");
+    if(!/^\\d{4}-\\d{2}-\\d{2}$/.test(date)||Number.isNaN(Date.parse(date+"T12:00:00")))throw new ValidationError("Confirm an event date");
+    if(time&&!/^([01]\\d|2[0-3]):[0-5]\\d$/.test(time))throw new ValidationError("Invalid time");
+    const claimed=await env.DB.prepare("UPDATE personal_email_suggestions SET review_status='processing' WHERE message_id=? AND review_status='pending'").bind(body.id).run();
+    if(!claimed.meta.changes)return json({error:"Already reviewed"},409);
+    const eventId=crypto.randomUUID();
+    try{
+      await env.DB.prepare("INSERT INTO events (id,title,date,time,category,recurring,notes,created_at) VALUES (?,?,?,?,?,?,?,?)")
+        .bind(eventId,title,date,time,"personal",0,"",Date.now()).run();
+      await env.DB.prepare("UPDATE personal_email_suggestions SET review_status='approved',event_id=? WHERE message_id=?")
+        .bind(eventId,body.id).run();
+      return json({status:"approved",eventId});
+    }catch(err){
+      await env.DB.prepare("UPDATE personal_email_suggestions SET review_status='pending' WHERE message_id=? AND review_status='processing'").bind(body.id).run();
+      throw err;
     }
   }
   return json({error:"Not found"},404);
