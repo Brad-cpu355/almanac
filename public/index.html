@@ -794,6 +794,27 @@
       var kind=document.createElement("select");["exam","homework","activity","parent","other"].forEach(function(value){var option=document.createElement("option");option.value=value;option.textContent=value;kind.appendChild(option);});kind.value=item.kind;kind.setAttribute("aria-label","Type");box.appendChild(kind);
       var date=document.createElement("input");date.type="date";date.value=(item.proposed&&item.proposed.date)||"";date.setAttribute("aria-label","Event date (optional)");box.appendChild(date);
       var hint=document.createElement("small");hint.textContent=item.proposed&&item.proposed.date?"Suggested date ("+(item.proposed.confidence||"high")+" confidence) from "+item.proposed.basis+": "+item.proposed.evidence+". "+(item.proposed.allDay?"All-day event detected (00:00–23:59). ":"")+"Confirm against the email before approving.":item.proposed&&item.proposed.ambiguous?"Ambiguous date expression or multiple possible dates. Enter the correct date manually.":"No unambiguous date detected. Confirm the date in the email; leaving it blank creates a notice only.";box.appendChild(hint);
+      var translate=document.createElement("button");translate.type="button";translate.className="btn btn-ghost";translate.textContent="Summarise in English";
+      var translation=document.createElement("div");translation.className="school-card";translation.hidden=true;
+      box.appendChild(translate);box.appendChild(translation);
+      translate.addEventListener("click",async function(){
+        translate.disabled=true;translate.textContent="Translating…";translation.hidden=false;translation.textContent="Processing selected school email securely…";
+        try{
+          var response=await fetch("/api/school-email/summarize",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({id:item.id})});
+          var result=await response.json();
+          if(!response.ok)throw new Error(result.error||"Translation failed");
+          translation.replaceChildren();
+          function line(label,value){var p=document.createElement("p");var strong=document.createElement("strong");strong.textContent=label+": ";p.appendChild(strong);p.appendChild(document.createTextNode(value));translation.appendChild(p);}
+          line("English subject",result.englishSubject);
+          line("Summary",result.summary);
+          line("Action required",result.actionRequired?"Yes":"No");
+          if(result.actions.length)line("Suggested actions",result.actions.join(" • "));
+          if(result.dates.length)line("Dates mentioned",result.dates.join(" • "));
+          if(result.uncertainties.length)line("Check",result.uncertainties.join(" • "));
+          line("Important",result.notice);
+        }catch(err){translation.textContent=err.message;}
+        finally{translate.disabled=false;translate.textContent="Summarise in English";}
+      });
       var analyze=document.createElement("button");analyze.type="button";analyze.className="btn btn-ghost";analyze.textContent="Find date in email";
       var analysisNote=document.createElement("small");analysisNote.textContent="Optional: reads this school email's text once to suggest a date. Its body is not saved.";
       box.appendChild(analyze);box.appendChild(analysisNote);
