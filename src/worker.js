@@ -260,7 +260,7 @@ function classifySchoolEmail(subject,snippet) {
 function suggestDateTime(subject, snippet, receivedAt) {
   const input=(subject+" "+(snippet||"")).slice(0,600);
   const monthNames={januari:1,februari:2,mars:3,april:4,maj:5,juni:6,juli:7,augusti:8,september:9,oktober:10,november:11,december:12,
-    january:1,february:2,march:3,may:5,june:6,july:7,august:8,october:10};
+    january:1,february:2,march:3,may:5,june:6,july:7,august:8,october:10,jan:1,feb:2,mar:3,apr:4,jun:6,jul:7,aug:8,sep:9,sept:9,okt:10,oct:10,nov:11,dec:12,december:12};
   const candidates=[];
   const add=(y,m,d,source)=>{
     y=Number(y);m=Number(m);d=Number(d);
@@ -272,7 +272,7 @@ function suggestDateTime(subject, snippet, receivedAt) {
   for(const m of input.matchAll(/\b(20\d{2})[-/.](\d{1,2})[-/.](\d{1,2})\b/g))add(m[1],m[2],m[3],m[0]);
   for(const m of input.matchAll(/\b(\d{1,2})[/.](\d{1,2})[/.](20\d{2})\b/g))add(m[3],m[2],m[1],m[0]);
   const receivedYear=new Date(Number(receivedAt)||Date.now()).getUTCFullYear();
-  for(const m of input.matchAll(/\b(\d{1,2})\s+(januari|februari|mars|april|maj|juni|juli|augusti|september|oktober|november|december|january|february|march|may|june|july|august|october)\s*(20\d{2})?\b/gi))
+  for(const m of input.matchAll(/\b(\d{1,2})\s+(januari|februari|mars|april|maj|juni|juli|augusti|september|oktober|november|december|january|february|march|may|june|july|august|october|jan|feb|mar|apr|jun|jul|aug|sep|sept|okt|oct|nov|dec)\s*(20\d{2})?\b/gi))
     add(m[3]||receivedYear,monthNames[m[2].toLowerCase()],m[1],m[0]);
   const unique=[...new Set(candidates.map(c=>c.date))];
   // Multiple distinct dates require human disambiguation.
