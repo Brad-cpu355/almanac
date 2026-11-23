@@ -106,7 +106,7 @@ const encoder = new TextEncoder();
 function b64url(bytes) {
   let binary = "";
   for (const b of bytes) binary += String.fromCharCode(b);
-  return btoa(binary).replace(/\\+/g, "-").replace(/\\//g, "_").replace(/=+$/g, "");
+  return btoa(binary).split("+").join("-").split("/").join("_").replace(/=+$/g, "");
 }
 function unb64url(value) {
   const padded = value.replace(/-/g, "+").replace(/_/g, "/");
