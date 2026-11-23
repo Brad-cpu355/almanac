@@ -280,7 +280,8 @@ function suggestDateTime(subject, snippet, receivedAt) {
   const times=[...input.matchAll(/\b(?:kl\.?|klockan|at)\s*(\d{1,2})[:.](\d{2})\b/gi)]
     .map(m=>String(Number(m[1])).padStart(2,"0")+":"+m[2]).filter(t=>/^([01]\d|2[0-3]):[0-5]\d$/.test(t));
   const uniqueTimes=[...new Set(times)];
-  return {date,time:uniqueTimes.length===1?uniqueTimes[0]:"",ambiguous:unique.length>1||uniqueTimes.length>1,
+  const allDay=/\b(?:0?0[:.]00|00[:.]00)\s*[-–—]\s*23[:.]59\b/.test(input);
+  return {date,time:allDay?"":uniqueTimes.length===1?uniqueTimes[0]:"",allDay,ambiguous:unique.length>1||uniqueTimes.length>1,
     evidence:date?candidates.find(c=>c.date===date).source:"",basis:snippet?"subject and preview":"subject only"};
 }
 function schoolEmailRow(row) {
