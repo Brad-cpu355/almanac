@@ -274,15 +274,46 @@ function suggestDateTime(subject, snippet, receivedAt) {
   const receivedYear=new Date(Number(receivedAt)||Date.now()).getUTCFullYear();
   for(const m of input.matchAll(/\b(\d{1,2})\s+(januari|februari|mars|april|maj|juni|juli|augusti|september|oktober|november|december|january|february|march|may|june|july|august|october|jan|feb|mar|apr|jun|jul|aug|sep|sept|okt|oct|nov|dec)\s*(20\d{2})?\b/gi))
     add(m[3]||receivedYear,monthNames[m[2].toLowerCase()],m[1],m[0]);
+  // Relative expressions are anchored to the message received date, not scan date.
+  // Received timestamps are a fallback for sent time; weekday boundaries near
+  // midnight can be uncertain, so relative suggestions require verification.
+  const anchor=new Date(Number(receivedAt)||Date.now());
+  const relativeMatches=[];
+  const relativeAdd=(days,label,confidence)=>{
+    const target=new Date(Date.UTC(anchor.getUTCFullYear(),anchor.getUTCMonth(),anchor.getUTCDate()+days));
+    relativeMatches.push({date:target.toISOString().slice(0,10),source:label,confidence});
+  };
+  for(const match of input.matchAll(/\b(idag|imorgon|i morgon|today|tomorrow)\b/gi)){
+    const word=match[1].toLowerCase();
+    relativeAdd(word==="idag"||word==="today"?0:1,match[0],"medium");
+  }
+  const weekdays={måndag:1,tisdag:2,onsdag:3,torsdag:4,fredag:5,lördag:6,söndag:0,
+    monday:1,tuesday:2,wednesday:3,thursday:4,friday:5,saturday:6,sunday:0};
+  for(const match of input.matchAll(/\b(på|nästa|next|on)\s+(måndag|tisdag|onsdag|torsdag|fredag|lördag|söndag|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/gi)){
+    const target=weekdays[match[2].toLowerCase()];
+    let days=(target-anchor.getUTCDay()+7)%7;
+    if(days===0)days=7;
+    // "nästa fredag" can mean either the coming Friday or Friday next week.
+    // Do not silently choose one interpretation.
+    if(/^(nästa|next)$/i.test(match[1]))relativeMatches.push({date:"",source:match[0],confidence:"ambiguous"});
+    else relativeAdd(days,match[0],"medium");
+  }
+  // A week number describes a range, not an individual event date.
+  if(/\b(?:vecka|v\.|week)\s*\d{1,2}\b/i.test(input))
+    relativeMatches.push({date:"",source:"week number",confidence:"ambiguous"});
   const unique=[...new Set(candidates.map(c=>c.date))];
   // Multiple distinct dates require human disambiguation.
-  const date=unique.length===1?unique[0]:"";
+  const relativeDates=[...new Set(relativeMatches.filter(r=>r.date).map(r=>r.date))];
+  const conflict=unique.length>1 || relativeDates.length>1 || (unique.length===1&&relativeDates.some(d=>d!==unique[0]));
+  const uncertain=relativeMatches.some(r=>r.confidence==="ambiguous");
+  const date=!conflict&&unique.length===1?unique[0]:!conflict&&!uncertain&&relativeDates.length===1?relativeDates[0]:"";
+  const confidence=conflict||uncertain?"ambiguous":unique.length===1?"high":date?"medium":"none";
   const times=[...input.matchAll(/\b(?:kl\.?|klockan|at)\s*(\d{1,2})[:.](\d{2})\b/gi)]
     .map(m=>String(Number(m[1])).padStart(2,"0")+":"+m[2]).filter(t=>/^([01]\d|2[0-3]):[0-5]\d$/.test(t));
   const uniqueTimes=[...new Set(times)];
   const allDay=/\b(?:0?0[:.]00|00[:.]00)\s*[-–—]\s*23[:.]59\b/.test(input);
-  return {date,time:allDay?"":uniqueTimes.length===1?uniqueTimes[0]:"",allDay,ambiguous:unique.length>1||uniqueTimes.length>1,
-    evidence:date?candidates.find(c=>c.date===date).source:"",basis:snippet?"subject and preview":"subject only"};
+  return {date,time:allDay?"":uniqueTimes.length===1?uniqueTimes[0]:"",allDay,confidence,ambiguous:confidence==="ambiguous"||uniqueTimes.length>1,
+    evidence:date?(candidates.find(c=>c.date===date)?.source||relativeMatches.find(r=>r.date===date)?.source||""):"",basis:snippet?"subject and preview":"subject only"};
 }
 function schoolEmailRow(row) {
   return {id:row.message_id,subject:row.subject,sender:row.sender,snippet:row.snippet,
