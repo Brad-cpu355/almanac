@@ -321,13 +321,14 @@
       <div class="segmented" role="tablist" aria-label="View">
         <button type="button" data-view="agenda" class="active">Agenda</button>
         <button type="button" data-view="year">Year</button>
-        <button type="button" data-view="school">School</button>
-        <button type="button" data-view="personal">Personal</button>
+        <button type="button" data-view="school">School <span id="schoolTabBadge" class="review-badge" hidden></span></button>
+        <button type="button" data-view="personal">Personal <span id="personalTabBadge" class="review-badge" hidden></span></button>
       </div>
       <button type="button" class="btn btn-primary" id="addBtn">+ Add</button>
     </div>
   </header>
 
+  <style>.review-badge{display:inline-block;background:#b93232;color:white;border-radius:999px;padding:1px 6px;font-size:11px;font-weight:700;min-width:17px;text-align:center}.review-badge[hidden]{display:none}</style>
   <div class="filter-bar" id="mainFilters" aria-label="Filter calendar events">
     <span class="filter-label">Show</span>
     <button type="button" class="filter-btn active" data-filter="all" aria-pressed="true">All</button>
@@ -338,6 +339,11 @@
 
   <main>
     <section class="view active" id="view-agenda">
+      <section class="school-card" id="emailReviewSummary" aria-label="Emails awaiting review">
+        <h2>📬 Emails to review <span id="reviewTotal">…</span></h2>
+        <p><button type="button" class="btn btn-ghost" id="reviewSchoolJump">School: <strong id="reviewSchoolCount">…</strong> →</button> <button type="button" class="btn btn-ghost" id="reviewPersonalJump">Personal: <strong id="reviewPersonalCount">…</strong> →</button></p>
+        <p class="hint" id="reviewScanHint">Counts reflect emails already scanned, not your live Gmail inbox.</p>
+      </section>
       <div id="agendaContent"></div>
     </section>
 
@@ -366,7 +372,7 @@
         <button type="button" class="btn btn-ghost" id="gmailDisconnect" hidden>Disconnect Gmail</button>
         <p class="hint">Read-only Gmail access. Scanning happens only when you click the button. Nothing is added to the calendar without approval.</p>
       </div>
-      <div class="school-card"><h2>School Email Inbox</h2><button type="button" class="btn btn-primary" id="gmailScan">Scan Gmail (last 30 days)</button><p id="gmailScanStatus" class="hint">Review suggested school emails before adding anything.</p><div id="gmailSuggestions"></div></div>
+      <div class="school-card" id="schoolEmailInbox"><h2>School Email Inbox</h2><button type="button" class="btn btn-primary" id="gmailScan">Scan Gmail (last 30 days)</button><p id="gmailScanStatus" class="hint">Review suggested school emails before adding anything.</p><div id="gmailSuggestions"></div></div>
       <div class="school-card"><h2>School notices to check</h2>
         <button type="button" class="btn btn-ghost" id="noticeAddBtn">+ Add notice</button>
         <div id="schoolNotices" style="margin-top:14px"></div>
@@ -774,9 +780,33 @@
       var response=await fetch("/api/school-email/suggestions",{cache:"no-store"});
       if(!response.ok)throw new Error("Could not load school email suggestions");
       gmailSuggestions=await response.json();
+      reviewCounts.school=gmailSuggestions.filter(function(item){return item.status==="pending";}).length;
+      updateReviewCounts();
       renderEmailSuggestions();
     }catch(err){gmailScanStatus.textContent=err.message;}
   }
+  var reviewCounts={school:null,personal:null};
+  function updateReviewCounts(){
+    var school=reviewCounts.school,personal=reviewCounts.personal;
+    var total=school===null||personal===null?null:school+personal;
+    document.getElementById("reviewSchoolCount").textContent=school===null?"—":school;
+    document.getElementById("reviewPersonalCount").textContent=personal===null?"—":personal;
+    document.getElementById("reviewTotal").textContent=total===null?"—":total;
+    [["schoolTabBadge",school],["personalTabBadge",personal]].forEach(function(entry){
+      var badge=document.getElementById(entry[0]);badge.hidden=!(entry[1]>0);badge.textContent=entry[1]||"";
+    });
+    var hint=document.getElementById("reviewScanHint");
+    var last=localStorage.getItem("almanacLastEmailScan");
+    hint.textContent="Counts reflect emails already scanned, not live Gmail."+(last?" Last scan on this device: "+new Date(Number(last)).toLocaleString()+".":" Scan Gmail in School or Personal to find new messages.");
+  }
+  function goToReview(view,id){
+    setView(view);
+    var target=document.getElementById(id);
+    if(target)target.scrollIntoView({behavior:"smooth",block:"start"});
+  }
+  document.getElementById("reviewSchoolJump").addEventListener("click",function(){goToReview("school","schoolEmailInbox");});
+  document.getElementById("reviewPersonalJump").addEventListener("click",function(){goToReview("personal","personalEmailInbox");});
+  updateReviewCounts();
   function gmailMessageLink(id){
     if(typeof id!=="string"||!/^[a-zA-Z0-9_-]{8,100}$/.test(id))return null;
     return "https://mail.google.com/mail/u/0/#all/"+encodeURIComponent(id);
@@ -871,6 +901,7 @@
       var result=await response.json();
       if(!response.ok)throw new Error(result.error||"Scan failed");
       gmailScanStatus.textContent="Checked "+result.checked+" messages; "+result.added+" new suggestions. Review dates and children before approval.";
+      localStorage.setItem("almanacLastEmailScan",String(Date.now()));
       await reloadEmailSuggestions();
     }catch(err){gmailScanStatus.textContent="Scan failed: "+err.message;}
     finally{gmailScan.disabled=false;}
@@ -886,6 +917,8 @@
       var response=await fetch("/api/personal-email/suggestions",{cache:"no-store"});
       if(!response.ok)throw new Error("Could not load personal email suggestions");
       var items=await response.json();
+      reviewCounts.personal=items.filter(function(item){return item.status==="pending";}).length;
+      updateReviewCounts();
       personalList.innerHTML="";
       var pending=items.filter(function(item){return item.status==="pending";});
       if(!pending.length){personalList.textContent="No personal emails awaiting review.";return;}
@@ -928,6 +961,7 @@
       var result=await response.json();
       if(!response.ok)throw new Error(result.error||"Scan failed");
       personalStatus.textContent="Checked "+result.checked+" messages; "+result.added+" new suggestions.";
+      localStorage.setItem("almanacLastEmailScan",String(Date.now()));
       await reloadPersonalEmails();
     }catch(err){personalStatus.textContent="Scan failed: "+err.message;}
     finally{personalScan.disabled=false;}
