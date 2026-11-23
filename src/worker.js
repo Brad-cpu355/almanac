@@ -38,6 +38,7 @@ export default {
 async function handleApi(request, env, url) {
   const segments = url.pathname.split("/").filter(Boolean); // ["api", "events", id?]
   if (segments[1] === "auth" && segments[2] === "google") return handleGoogleAuth(request, env, url, segments[3]);
+  if (segments[1] === "school-email") return handleSchoolEmail(request, env, url, segments[2]);
   if (segments[1] === "school-notices") return handleSchoolNotices(request, env, segments[2]);
   if (segments[1] !== "events") return json({ error: "Not found" }, 404);
 
@@ -202,6 +203,131 @@ async function handleGoogleAuth(request, env, url, action) {
     // Disconnect locally; revoke Google access separately in Google Account settings if desired.
     await env.DB.prepare("DELETE FROM gmail_connection WHERE id=1").run();
     return json({connected:false});
+  }
+  return json({error:"Not found"},404);
+}
+
+
+/* Development-only manual Gmail scan. Never import without explicit approval.
+ * Store only selected message metadata, not full message bodies or tokens.
+ */
+async function gmailAccessToken(env) {
+  const row=await env.DB.prepare("SELECT encrypted_token FROM gmail_connection WHERE id=1").first();
+  if (!row) throw new ValidationError("Connect Gmail first");
+  const [iv, ciphertext]=row.encrypted_token.split(".");
+  const raw=await crypto.subtle.decrypt({name:"AES-GCM",iv:unb64url(iv)},await gmailKey(env),unb64url(ciphertext));
+  const saved=JSON.parse(new TextDecoder().decode(raw));
+  const response=await fetch("https://oauth2.googleapis.com/token",{method:"POST",
+    headers:{"content-type":"application/x-www-form-urlencoded"},
+    body:new URLSearchParams({client_id:env.GMAIL_CLIENT_ID,client_secret:env.GMAIL_CLIENT_SECRET,
+      refresh_token:saved.refresh_token,grant_type:"refresh_token"})});
+  if(!response.ok) throw new ValidationError("Google access expired. Reconnect Gmail and try again.");
+  const data=await response.json();
+  if(!data.access_token) throw new ValidationError("Google did not return an access token");
+  return data.access_token;
+}
+async function gmailRequest(token,path) {
+  const response=await fetch("https://gmail.googleapis.com/gmail/v1/users/me/"+path,{
+    headers:{authorization:"Bearer "+token,accept:"application/json"}});
+  if(!response.ok) throw new Error("Gmail API returned "+response.status);
+  return response.json();
+}
+async function ensureSchoolEmail(db) {
+  await db.prepare(`CREATE TABLE IF NOT EXISTS school_email_suggestions (
+    message_id TEXT PRIMARY KEY, subject TEXT NOT NULL, sender TEXT NOT NULL,
+    snippet TEXT NOT NULL, received_at INTEGER NOT NULL, child TEXT NOT NULL DEFAULT '',
+    kind TEXT NOT NULL DEFAULT 'other', due_date TEXT NOT NULL DEFAULT '',
+    review_status TEXT NOT NULL DEFAULT 'pending', notice_id TEXT NOT NULL DEFAULT '',
+    event_id TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL
+  )`).run();
+}
+function classifySchoolEmail(subject,snippet) {
+  const text=(subject+" "+snippet).toLowerCase();
+  // Never surface potentially sensitive health, welfare, or safeguarding mail.
+  if(/(hälsa|sjukdom|diagnos|kurator|elevhälsa|psykolog|specialpedagog|mobbn|health|medical|diagnos|counsell|safeguard|socialtjänst|frånvaro|absence)/i.test(text)) return null;
+  const walter=/\\bwalter\\b/i.test(text), ingalill=/\\bingalill\\b/i.test(text);
+  const child=walter&&!ingalill?"walter":ingalill&&!walter?"ingalill":"";
+  const kind=/(prov|test|exam|tentamen)/i.test(text)?"exam":/(läxa|homework|inlämning|assignment)/i.test(text)?"homework":/(utflykt|aktivitet|activity|excursion|studiedag)/i.test(text)?"activity":/(föräldra|vårdnadshavare|parent|möte|meeting)/i.test(text)?"parent":"other";
+  // Dates are intentionally left unconfirmed: snippets may contain several dates,
+  // relative dates or dates referring to the message rather than the event.
+  return {child,kind,dueDate:""};
+}
+function schoolEmailRow(row) {
+  return {id:row.message_id,subject:row.subject,sender:row.sender,snippet:row.snippet,
+    receivedAt:row.received_at,child:row.child,kind:row.kind,dueDate:row.due_date,
+    status:row.review_status};
+}
+async function handleSchoolEmail(request,env,url,action) {
+  if(url.hostname!==GMAIL_PREVIEW_HOST||url.protocol!=="https:")return json({error:"Not available"},404);
+  if(request.method!=="GET" && request.headers.get("origin")!=="https://"+GMAIL_PREVIEW_HOST)
+    return json({error:"Invalid request origin"},403);
+  await ensureSchoolEmail(env.DB);
+  if(action==="suggestions" && request.method==="GET"){
+    const {results}=await env.DB.prepare("SELECT * FROM school_email_suggestions ORDER BY received_at DESC LIMIT 100").all();
+    return json(results.map(schoolEmailRow));
+  }
+  if(action==="scan" && request.method==="POST"){
+    const token=await gmailAccessToken(env);
+    // Explicitly limit the query to school-service senders, not the full inbox.
+    const query='newer_than:30d {from:(unikum.net) from:(malmo.se) from:(malmö.se)}';
+    const list=await gmailRequest(token,"messages?"+new URLSearchParams({q:query,maxResults:"40"}));
+    let added=0,skipped=0;
+    for(const item of list.messages||[]){
+      const existing=await env.DB.prepare("SELECT message_id FROM school_email_suggestions WHERE message_id=?").bind(item.id).first();
+      if(existing){skipped++;continue;}
+      const message=await gmailRequest(token,"messages/"+encodeURIComponent(item.id)+"?format=metadata&metadataHeaders=Subject&metadataHeaders=From");
+      const headers=message.payload?.headers||[];
+      const subject=(headers.find(h=>h.name.toLowerCase()==="subject")?.value||"").slice(0,160);
+      const sender=(headers.find(h=>h.name.toLowerCase()==="from")?.value||"").slice(0,200);
+      const snippet=(message.snippet||"").slice(0,300);
+      const classified=classifySchoolEmail(subject,snippet);
+      if(!classified){skipped++;continue;}
+      await env.DB.prepare(`INSERT OR IGNORE INTO school_email_suggestions
+        (message_id,subject,sender,snippet,received_at,child,kind,due_date,created_at)
+        VALUES (?,?,?,?,?,?,?,?,?)`).bind(item.id,subject,sender,snippet,
+        Number(message.internalDate)||Date.now(),classified.child,classified.kind,"",Date.now()).run();
+      added++;
+    }
+    return json({added,skipped,checked:(list.messages||[]).length});
+  }
+  if(action==="review" && request.method==="POST"){
+    const body=await request.json();
+    if(typeof body.id!=="string"||body.id.length>200)throw new ValidationError("Invalid suggestion");
+    const row=await env.DB.prepare("SELECT * FROM school_email_suggestions WHERE message_id=?").bind(body.id).first();
+    if(!row) return json({error:"Suggestion not found"},404);
+    if(row.review_status!=="pending")return json({error:"Already reviewed"},409);
+    if(body.decision==="dismiss"){
+      await env.DB.prepare("UPDATE school_email_suggestions SET review_status='dismissed' WHERE message_id=? AND review_status='pending'").bind(body.id).run();
+      return json({status:"dismissed"});
+    }
+    if(body.decision!=="approve")throw new ValidationError("Invalid decision");
+    if(!["walter","ingalill"].includes(body.child))throw new ValidationError("Select Walter or Ingalill");
+    const title=String(body.title||"").trim().slice(0,160);
+    if(!title)throw new ValidationError("Enter a title");
+    const date=String(body.date||"");
+    if(date&&!/^\\d{4}-\\d{2}-\\d{2}$/.test(date))throw new ValidationError("Invalid date");
+    const kind=["exam","homework","activity","parent","other"].includes(body.kind)?body.kind:"other";
+    const noticeId=crypto.randomUUID(),eventId=date?crypto.randomUUID():"";
+    await ensureSchoolNotices(env.DB);
+    // Guard against a double approval before creating calendar records.
+    const claimed=await env.DB.prepare("UPDATE school_email_suggestions SET review_status='processing' WHERE message_id=? AND review_status='pending'").bind(body.id).run();
+    if(!claimed.meta.changes)return json({error:"Already reviewed"},409);
+    try{
+      await env.DB.prepare("INSERT INTO school_notices (id,child,title,details,status,due_date,created_at) VALUES (?,?,?,?,?,?,?)")
+        .bind(noticeId,body.child,title,"From reviewed school email: "+row.sender,"action",date,Date.now()).run();
+      if(eventId){
+        await env.DB.prepare("INSERT INTO events (id,title,date,time,category,recurring,notes,created_at) VALUES (?,?,?,?,?,?,?,?)")
+          .bind(eventId,(body.child==="walter"?"[Walter · School] ":"[Ingalill · School] ")+title,date,"","family",0,"From approved school email",Date.now()).run();
+        await env.DB.prepare("INSERT INTO school_notice_links (notice_id,event_id,record_type,source) VALUES (?,?,?,?)")
+          .bind(noticeId,eventId,kind,"Gmail (reviewed)").run();
+      }
+      await env.DB.prepare("UPDATE school_email_suggestions SET review_status='approved',notice_id=?,event_id=?,child=?,due_date=?,kind=? WHERE message_id=?")
+        .bind(noticeId,eventId,body.child,date,kind,body.id).run();
+      return json({status:"approved",noticeId,eventId});
+    }catch(e){
+      await env.DB.prepare("UPDATE school_email_suggestions SET review_status='pending' WHERE message_id=? AND review_status='processing'").bind(body.id).run();
+      throw e;
+    }
   }
   return json({error:"Not found"},404);
 }
