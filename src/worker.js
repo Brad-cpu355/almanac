@@ -315,6 +315,29 @@ function suggestDateTime(subject, snippet, receivedAt) {
   return {date,time:allDay?"":uniqueTimes.length===1?uniqueTimes[0]:"",allDay,confidence,ambiguous:confidence==="ambiguous"||uniqueTimes.length>1,
     evidence:date?(candidates.find(c=>c.date===date)?.source||relativeMatches.find(r=>r.date===date)?.source||""):"",basis:snippet?"subject and preview":"subject only"};
 }
+/* On-demand, single-message body analysis. Content is never persisted or logged. */
+function gmailBodyText(message) {
+  const parts=[];
+  function visit(part,depth) {
+    if(depth>6 || parts.length>12)return;
+    if(part.mimeType==="text/plain" && part.body?.data)parts.push(part.body.data);
+    for(const child of part.parts||[])visit(child,depth+1);
+  }
+  visit(message.payload||{},0);
+  if(!parts.length)return "";
+  return parts.slice(0,4).map(encoded=>{
+    try{
+      const bytes=unb64url(encoded);
+      return new TextDecoder("utf-8",{fatal:false}).decode(bytes.slice(0,24000));
+    }catch{return "";}
+  }).join("\n").slice(0,12000);
+}
+function verifiedSchoolSender(header) {
+  const match=String(header||"").match(/<([^<>]+)>/) || String(header||"").match(/([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})/i);
+  const address=(match?.[1]||"").toLowerCase();
+  const domain=address.split("@")[1]||"";
+  return domain==="unikum.net"||domain.endsWith(".unikum.net")||domain==="malmo.se"||domain.endsWith(".malmo.se");
+}
 function schoolEmailRow(row) {
   return {id:row.message_id,subject:row.subject,sender:row.sender,snippet:row.snippet,
     receivedAt:row.received_at,child:row.child,kind:row.kind,dueDate:row.due_date,
@@ -353,6 +376,33 @@ async function handleSchoolEmail(request,env,url,action) {
       added++;
     }
     return json({added,skipped,checked:(list.messages||[]).length});
+  }
+  if(action==="analyze" && request.method==="POST"){
+    const body=await request.json();
+    if(typeof body.id!=="string"||body.id.length>200)throw new ValidationError("Invalid suggestion");
+    const row=await env.DB.prepare("SELECT * FROM school_email_suggestions WHERE message_id=? AND review_status='pending'").bind(body.id).first();
+    if(!row)return json({error:"Pending suggestion not found"},404);
+    if(!verifiedSchoolSender(row.sender)||row.sender.toLowerCase().includes("maria.rosenqvist@malmo.se"))
+      return json({error:"This sender is not eligible for school email analysis"},403);
+    // Only the explicitly selected message is fetched, never the entire inbox.
+    const token=await gmailAccessToken(env);
+    const message=await gmailRequest(token,"messages/"+encodeURIComponent(body.id)+"?format=full");
+    const headers=message.payload?.headers||[];
+    const actualSender=headers.find(h=>h.name.toLowerCase()==="from")?.value||"";
+    if(!verifiedSchoolSender(actualSender)||actualSender.toLowerCase().includes("maria.rosenqvist@malmo.se"))
+      return json({error:"Sender verification failed"},403);
+    const actualSubject=(headers.find(h=>h.name.toLowerCase()==="subject")?.value||"").slice(0,160);
+    const plain=gmailBodyText(message);
+    if(!plain)return json({found:false,message:"No readable plain-text email body available. Use the existing subject/preview suggestion."});
+    const sensitive=/(diagnos|psykolog|kurator|elevhälsa|sjukdom|therapy|therapist|medical|health|socialtjänst|safeguard)/i.test(actualSubject+" "+plain);
+    if(sensitive)return json({found:false,message:"This email may contain sensitive information. Body analysis was skipped."});
+    // Process up to 12k characters in memory; return only the proposed date/time.
+    const proposed=suggestDateTime(actualSubject,plain,Number(message.internalDate)||row.received_at);
+    return json({found:!!(proposed.date||proposed.time||proposed.allDay),proposed:{
+      date:proposed.date,time:proposed.time,allDay:proposed.allDay,
+      confidence:proposed.confidence,ambiguous:proposed.ambiguous,evidence:proposed.evidence,
+      basis:"selected email body"
+    }});
   }
   if(action==="review" && request.method==="POST"){
     const body=await request.json();
