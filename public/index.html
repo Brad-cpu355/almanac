@@ -150,6 +150,7 @@
 
   .view{ display:none; }
   .view.active{ display:block; }
+  #agendaTasks[hidden], #emailReviewSummary[hidden]{display:none !important;}
 
   /* ---------- School & event filters ---------- */
   .filter-bar{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin:0 0 16px;}
@@ -648,7 +649,7 @@
   (function loadUI(){
     try{
       var raw = localStorage.getItem("almanac-ui");
-      if(raw){ var p = JSON.parse(raw); if(p.view === "agenda" || p.view === "year" || p.view === "school") UI.view = p.view; if(["all","walter","ingalill","other"].indexOf(p.filter) !== -1) UI.filter = p.filter; }
+      if(raw){ var p = JSON.parse(raw); if(p.view === "agenda" || p.view === "year" || p.view === "school" || p.view === "personal") UI.view = p.view; if(["all","walter","ingalill","other"].indexOf(p.filter) !== -1) UI.filter = p.filter; }
     }catch(e){}
   })();
   function saveUI(){ try{ localStorage.setItem("almanac-ui", JSON.stringify({view:UI.view,filter:UI.filter})); }catch(e){} }
@@ -736,6 +737,8 @@
     UI.view = v; saveUI();
     el.segButtons.forEach(function(b){ b.classList.toggle("active", b.dataset.view===v); });
     el.viewAgenda.classList.toggle("active", v==="agenda");
+    document.getElementById("agendaTasks").hidden = v!=="agenda";
+    document.getElementById("emailReviewSummary").hidden = v!=="agenda";
     el.viewYear.classList.toggle("active", v==="year");
     el.viewSchool.classList.toggle("active", v==="school");
     el.viewPersonal.classList.toggle("active", v==="personal");
