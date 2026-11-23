@@ -365,19 +365,22 @@
         <button type="button" class="btn btn-primary" id="schoolTabAdd">+ Add school event</button>
       </div>
       <div id="schoolUpcoming"></div>
-      <div class="school-card">
-        <h2>Gmail connection</h2>
-        <p id="gmailStatus" class="hint">Checking Gmail connection…</p>
-        <button type="button" class="btn btn-primary" id="gmailConnect" hidden>Connect Gmail</button>
-        <button type="button" class="btn btn-ghost" id="gmailDisconnect" hidden>Disconnect Gmail</button>
-        <p class="hint">Read-only Gmail access. Scanning happens only when you click the button. Nothing is added to the calendar without approval.</p>
-      </div>
       <div class="school-card" id="schoolEmailInbox"><h2>School Email Inbox</h2><button type="button" class="btn btn-primary" id="gmailScan">Scan Gmail (last 30 days)</button><p id="gmailScanStatus" class="hint">Review suggested school emails before adding anything.</p><div id="gmailSuggestions"></div></div>
       <div class="school-card"><h2>School notices to check</h2>
         <button type="button" class="btn btn-ghost" id="noticeAddBtn">+ Add notice</button>
         <div id="schoolNotices" style="margin-top:14px"></div>
-        <p class="hint">Reference notes only. Gmail/Unikum syncing is not enabled.</p>
+        <p class="hint">Review and approve email suggestions above before adding school events or notices.</p>
       </div>
+
+      <details class="school-card" id="gmailSettings">
+        <summary style="cursor:pointer;font-weight:700">⚙️ Gmail settings · <span id="gmailSettingsIndicator">Checking…</span></summary>
+        <div style="padding-top:12px">
+          <p id="gmailStatus" class="hint">Checking Gmail connection…</p>
+          <button type="button" class="btn btn-primary" id="gmailConnect" hidden>Connect Gmail</button>
+          <button type="button" class="btn btn-ghost" id="gmailDisconnect" hidden>Disconnect Gmail</button>
+          <p class="hint">Read-only Gmail access. Scanning happens only when you click the button. Nothing is added to the calendar without approval.</p>
+        </div>
+      </details>
 
     </section>
 
@@ -751,10 +754,12 @@
       if(!response.ok) throw new Error("Connection status unavailable");
       var status=await response.json();
       label.textContent=status.connected?"Gmail connected (read-only).":status.configured?"Gmail is not connected.":"Gmail setup is incomplete. Configure Cloudflare secrets first.";
+      document.getElementById("gmailSettingsIndicator").textContent=status.connected?"Connected ✓":status.configured?"Not connected":"Setup required";
       connect.hidden=!status.configured||status.connected;
       disconnect.hidden=!status.connected;
     }catch(err){
       label.textContent="Gmail connection status unavailable.";
+      document.getElementById("gmailSettingsIndicator").textContent="Status unavailable";
       connect.hidden=true;disconnect.hidden=true;
     }
   }
