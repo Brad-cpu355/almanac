@@ -253,10 +253,40 @@ function classifySchoolEmail(subject,snippet) {
   // relative dates or dates referring to the message rather than the event.
   return {child,kind,dueDate:""};
 }
+
+/* Conservative extraction from already-stored subject/snippet metadata only.
+ * Never infer relative dates, and never treat the received date as an event date.
+ */
+function suggestDateTime(subject, snippet, receivedAt) {
+  const input=(subject+" "+(snippet||"")).slice(0,600);
+  const monthNames={januari:1,februari:2,mars:3,april:4,maj:5,juni:6,juli:7,augusti:8,september:9,oktober:10,november:11,december:12,
+    january:1,february:2,march:3,may:5,june:6,july:7,august:8,october:10};
+  const candidates=[];
+  const add=(y,m,d,source)=>{
+    y=Number(y);m=Number(m);d=Number(d);
+    if(y<100)y+=2000;
+    const check=new Date(Date.UTC(y,m-1,d));
+    if(check.getUTCFullYear()!==y||check.getUTCMonth()!==m-1||check.getUTCDate()!==d)return;
+    candidates.push({date:String(y).padStart(4,"0")+"-"+String(m).padStart(2,"0")+"-"+String(d).padStart(2,"0"),source});
+  };
+  for(const m of input.matchAll(/\b(20\d{2})[-/.](\d{1,2})[-/.](\d{1,2})\b/g))add(m[1],m[2],m[3],m[0]);
+  for(const m of input.matchAll(/\b(\d{1,2})[/.](\d{1,2})[/.](20\d{2})\b/g))add(m[3],m[2],m[1],m[0]);
+  const receivedYear=new Date(Number(receivedAt)||Date.now()).getUTCFullYear();
+  for(const m of input.matchAll(/\b(\d{1,2})\s+(januari|februari|mars|april|maj|juni|juli|augusti|september|oktober|november|december|january|february|march|may|june|july|august|october)\s*(20\d{2})?\b/gi))
+    add(m[3]||receivedYear,monthNames[m[2].toLowerCase()],m[1],m[0]);
+  const unique=[...new Set(candidates.map(c=>c.date))];
+  // Multiple distinct dates require human disambiguation.
+  const date=unique.length===1?unique[0]:"";
+  const times=[...input.matchAll(/\b(?:kl\.?|klockan|at)\s*(\d{1,2})[:.](\d{2})\b/gi)]
+    .map(m=>String(Number(m[1])).padStart(2,"0")+":"+m[2]).filter(t=>/^([01]\d|2[0-3]):[0-5]\d$/.test(t));
+  const uniqueTimes=[...new Set(times)];
+  return {date,time:uniqueTimes.length===1?uniqueTimes[0]:"",ambiguous:unique.length>1||uniqueTimes.length>1,
+    evidence:date?candidates.find(c=>c.date===date).source:"",basis:snippet?"subject and preview":"subject only"};
+}
 function schoolEmailRow(row) {
   return {id:row.message_id,subject:row.subject,sender:row.sender,snippet:row.snippet,
     receivedAt:row.received_at,child:row.child,kind:row.kind,dueDate:row.due_date,
-    status:row.review_status};
+    status:row.review_status,proposed:suggestDateTime(row.subject,row.snippet,row.received_at)};
 }
 async function handleSchoolEmail(request,env,url,action) {
   if(url.hostname!==GMAIL_PREVIEW_HOST||url.protocol!=="https:")return json({error:"Not available"},404);
@@ -354,7 +384,7 @@ async function handlePersonalEmail(request,env,url,action){
   await ensurePersonalEmail(env.DB);
   if(action==="suggestions" && request.method==="GET"){
     const {results}=await env.DB.prepare("SELECT message_id,subject,received_at,review_status FROM personal_email_suggestions ORDER BY received_at DESC LIMIT 100").all();
-    return json(results.map(r=>({id:r.message_id,subject:r.subject,receivedAt:r.received_at,status:r.review_status})));
+    return json(results.map(r=>({id:r.message_id,subject:r.subject,receivedAt:r.received_at,status:r.review_status,proposed:suggestDateTime(r.subject,"",r.received_at)})));
   }
   if(action==="scan" && request.method==="POST"){
     const token=await gmailAccessToken(env);
