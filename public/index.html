@@ -387,7 +387,7 @@
   <header class="topbar">
     <div class="brand">
       <h1>Almanac</h1>
-      <div class="sync-status"><span class="sync-dot" id="syncDot"></span><span id="syncLabel">Connecting…</span></div>
+      <div class="sync-status"><span class="sync-dot" id="syncDot"></span><span id="syncLabel">Connecting.</span></div>
     </div>
     <div class="topbar-actions">
       <div class="segmented" role="tablist" aria-label="View">
@@ -413,19 +413,19 @@
   <main>
     <section class="view active" id="view-agenda">
       <section class="school-card" id="emailReviewSummary" aria-label="Emails awaiting review">
-        <h2>📬 Emails to review <span id="reviewTotal">…</span></h2>
-        <p><button type="button" class="btn btn-ghost" id="reviewSchoolJump">School: <strong id="reviewSchoolCount">…</strong> →</button> <button type="button" class="btn btn-ghost" id="reviewPersonalJump">Personal: <strong id="reviewPersonalCount">…</strong> →</button></p>
+        <h2>?? Emails to review <span id="reviewTotal">.</span></h2>
+        <p><button type="button" class="btn btn-ghost" id="reviewSchoolJump">School: <strong id="reviewSchoolCount">.</strong> </button> <button type="button" class="btn btn-ghost" id="reviewPersonalJump">Personal: <strong id="reviewPersonalCount">.</strong> </button></p>
         <p class="hint" id="reviewScanHint">Counts reflect emails already scanned, not your live Gmail inbox.</p>
       </section>
       <section class="school-card" id="generalTasks" aria-label="General tasks">
-        <h2>☑ My tasks <span id="generalTaskCount">…</span></h2>
+        <h2>? My tasks <span id="generalTaskCount">.</span></h2>
         <form id="generalTaskForm" style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0">
           <input id="generalTaskInput" type="text" maxlength="500" required placeholder="Add a task" aria-label="New task" style="flex:1;min-width:160px;padding:9px;border:1px solid var(--line);border-radius:8px">
           <button class="btn btn-primary" type="submit">+ Add task</button>
         </form>
-        <div id="generalTaskList"><p class="hint">Loading tasks…</p></div>
+        <div id="generalTaskList"><p class="hint">Loading tasks.</p></div>
       </section>
-      <section class="school-card" id="agendaTasks" aria-label="School actions requiring attention"><h2>☑ School actions <span id="agendaTaskCount">…</span></h2><div id="agendaTaskList"><p class="hint">Loading school actions…</p></div></section>
+      <section class="school-card" id="agendaTasks" aria-label="School actions requiring attention"><h2>? School actions <span id="agendaTaskCount">.</span></h2><div id="agendaTaskList"><p class="hint">Loading school actions.</p></div></section>
       <div id="agendaContent"></div>
     </section>
 
@@ -438,7 +438,7 @@
   </section>
       <div class="school-card">
         <h2>School planner</h2>
-        <p>Walter and Ingalill’s upcoming school events.</p>
+        <p>Walter and Ingalill's upcoming school events.</p>
         <div class="filter-bar" aria-label="School child filter">
           <button class="filter-btn active" type="button" data-school-filter="all">Both</button>
           <button class="filter-btn" type="button" data-school-filter="walter">Walter</button>
@@ -455,11 +455,20 @@
       </div>
 
       <details class="school-card" id="gmailSettings">
-        <summary style="cursor:pointer;font-weight:700">⚙️ Gmail settings · <span id="gmailSettingsIndicator">Checking…</span></summary>
+        <summary style="cursor:pointer;font-weight:700">?? Gmail settings � <span id="gmailSettingsIndicator">Checking.</span></summary>
         <div style="padding-top:12px">
-          <p id="gmailStatus" class="hint">Checking Gmail connection…</p>
+          <p id="gmailStatus" class="hint">Checking Gmail connection.</p>
           <button type="button" class="btn btn-primary" id="gmailConnect" hidden>Connect Gmail</button>
           <button type="button" class="btn btn-ghost" id="gmailDisconnect" hidden>Disconnect Gmail</button>
+          <h3>Personal email senders</h3>
+          <form id="personalSenderForm">
+            <label for="personalSenderInput">Email address or domain</label>
+            <input id="personalSenderInput" type="text" placeholder="person@example.com or example.com"
+              maxlength="254" required autocapitalize="none" spellcheck="false">
+            <button type="submit" class="btn btn-ghost" disabled>Add sender</button>
+          </form>
+          <ul id="personalSenderList"></ul>
+          <p class="hint" id="personalSenderStatus" role="status"></p>
           <p class="hint">Read-only Gmail access. Scanning happens only when you click the button. Nothing is added to the calendar without approval.</p>
         </div>
       </details>
@@ -471,7 +480,8 @@
       <div class="school-card" id="personalEmailCard">
         <div id="personalEmailInbox"></div>
         <h2>Personal Email Inbox</h2>
-        <p class="hint">Private review for messages from Maria Rosenqvist only. Scanning is manual; only email subjects and dates are stored. No email bodies are imported.</p>
+        <p class="hint">Scan your selected senders. Almanac stores subjects and dates for review.</p>
+        <button type="button" class="btn btn-ghost" id="managePersonalSenders">Manage senders</button>
         <button type="button" class="btn btn-primary" id="personalScan">Scan personal emails (last 30 days)</button>
         <p id="personalScanStatus" class="hint">Nothing is added without your approval.</p>
         <div id="personalSuggestions"></div>
@@ -497,14 +507,14 @@
 <!-- School notice editor -->
 <div class="overlay" id="noticeOverlay" hidden>
   <div class="panel">
-    <div class="panel-head"><h2 id="noticePanelTitle">School notice</h2><button type="button" class="btn btn-icon" id="noticeClose" aria-label="Close">×</button></div>
+    <div class="panel-head"><h2 id="noticePanelTitle">School notice</h2><button type="button" class="btn btn-icon" id="noticeClose" aria-label="Close">�</button></div>
     <form id="noticeForm">
       <div class="field"><label for="noticeChild">Child</label><select id="noticeChild" required style="width:100%;padding:10px;background:var(--surface-2);color:var(--ink)"><option value="walter">Walter</option><option value="ingalill">Ingalill</option></select></div>
       <div class="field"><label for="noticeTitle">Notice</label><input type="text" id="noticeTitle" maxlength="160" required></div>
       <div class="field"><label for="noticeDetails">Details</label><textarea id="noticeDetails" maxlength="1000"></textarea></div>
       <div class="field"><label for="noticeType">Type</label><select id="noticeType" style="width:100%;padding:10px"><option value="exam">Exam</option><option value="homework">Homework</option><option value="activity">School activity</option><option value="parent">Parent action</option><option value="other">Other</option></select></div>
       <div class="field"><label for="noticeLink">Linked calendar event (optional)</label><select id="noticeLink" style="width:100%;padding:10px"><option value="">No linked event</option></select></div>
-      <div class="field"><label for="noticeSource">Source (optional)</label><input id="noticeSource" maxlength="160" placeholder="Manual, Gmail, Unikum…"></div>
+      <div class="field"><label for="noticeSource">Source (optional)</label><input id="noticeSource" maxlength="160" placeholder="Manual, Gmail, Unikum."></div>
       <div class="field"><label for="noticeDue">Date (optional)</label><input type="date" id="noticeDue"></div>
       <div class="field"><label for="noticeStatus">Status</label><select id="noticeStatus" style="width:100%;padding:10px;background:var(--surface-2);color:var(--ink)"><option value="action">Action required</option><option value="upcoming">Upcoming</option><option value="completed">Completed</option></select></div>
       <div class="panel-actions"><button type="button" class="btn btn-danger" id="noticeDelete" hidden>Delete</button><button type="submit" class="btn btn-primary" id="noticeSave">Save notice</button></div>
@@ -558,8 +568,8 @@
         <label for="f-school">School / child (optional)</label>
         <select id="f-school" style="width:100%;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--surface-2);color:var(--ink);padding:10px 12px;font-size:.95rem;font-family:inherit;">
           <option value="">Not a school event</option>
-          <option value="walter">Walter — Linnéskolan</option>
-          <option value="ingalill">Ingalill — Linnéskolan</option>
+          <option value="walter">Walter - Linn�skolan</option>
+          <option value="ingalill">Ingalill - Linn�skolan</option>
         </select>
       </div>
       <div class="field">
@@ -601,7 +611,7 @@
   var CATEGORY_ORDER = ["personal","work","family","school","birthday","other"];
   // School association is encoded in the title so it works with the existing
   // /api/events schema, without a database migration. Existing events are unchanged.
-  var SCHOOL_PREFIX = {walter:"[Walter · School] ", ingalill:"[Ingalill · School] "};
+  var SCHOOL_PREFIX = {walter:"[Walter � School] ", ingalill:"[Ingalill � School] "};
   function schoolChild(ev){
     var title = String(ev.title || "");
     if(title.indexOf(SCHOOL_PREFIX.walter) === 0) return "walter";
@@ -857,7 +867,7 @@
       if(!response.ok) throw new Error("Connection status unavailable");
       var status=await response.json();
       label.textContent=status.connected?"Gmail connected (read-only).":status.configured?"Gmail is not connected.":"Gmail setup is incomplete. Configure Cloudflare secrets first.";
-      document.getElementById("gmailSettingsIndicator").textContent=status.connected?"Connected ✓":status.configured?"Not connected":"Setup required";
+      document.getElementById("gmailSettingsIndicator").textContent=status.connected?"Connected V":status.configured?"Not connected":"Setup required";
       connect.hidden=!status.configured||status.connected;
       disconnect.hidden=!status.connected;
     }catch(err){
@@ -898,9 +908,9 @@
   function updateReviewCounts(){
     var school=reviewCounts.school,personal=reviewCounts.personal;
     var total=school===null||personal===null?null:school+personal;
-    document.getElementById("reviewSchoolCount").textContent=school===null?"—":school;
-    document.getElementById("reviewPersonalCount").textContent=personal===null?"—":personal;
-    document.getElementById("reviewTotal").textContent=total===null?"—":total;
+    document.getElementById("reviewSchoolCount").textContent=school===null?"-":school;
+    document.getElementById("reviewPersonalCount").textContent=personal===null?"-":personal;
+    document.getElementById("reviewTotal").textContent=total===null?"-":total;
     [["schoolTabBadge",school],["personalTabBadge",personal]].forEach(function(entry){
       var badge=document.getElementById(entry[0]);badge.hidden=!(entry[1]>0);badge.textContent=entry[1]||"";
     });
@@ -924,7 +934,7 @@
     var url=gmailMessageLink(id);
     if(!url)return;
     var a=document.createElement("a");a.href=url;a.target="_blank";a.rel="noopener noreferrer";
-    a.textContent="Open original in Gmail ↗";a.setAttribute("aria-label","Open original email in Gmail (new tab)");
+    a.textContent="Open original in Gmail ?";a.setAttribute("aria-label","Open original email in Gmail (new tab)");
     box.appendChild(a);
   }
   function renderEmailSuggestions(){
@@ -935,7 +945,7 @@
       var box=document.createElement("div");
       box.style.cssText="border-top:1px solid var(--line);padding:16px 0;display:grid;gap:8px";
       var heading=document.createElement("strong");heading.textContent=item.subject||"(No subject)";box.appendChild(heading);
-      var sender=document.createElement("small");sender.textContent=item.sender+" · "+new Date(item.receivedAt).toLocaleDateString();box.appendChild(sender);
+      var sender=document.createElement("small");sender.textContent=item.sender+" � "+new Date(item.receivedAt).toLocaleDateString();box.appendChild(sender);
       appendGmailLink(box,item.id);
       var snippet=document.createElement("p");snippet.textContent=item.snippet;box.appendChild(snippet);
       var child=document.createElement("select");
@@ -944,18 +954,18 @@
       var title=document.createElement("input");title.value=item.subject;title.maxLength=160;title.setAttribute("aria-label","Calendar title");box.appendChild(title);
       var kind=document.createElement("select");["exam","homework","activity","parent","other"].forEach(function(value){var option=document.createElement("option");option.value=value;option.textContent=value;kind.appendChild(option);});kind.value=item.kind;kind.setAttribute("aria-label","Type");box.appendChild(kind);
       var date=document.createElement("input");date.type="date";date.value=(item.proposed&&item.proposed.date)||"";date.setAttribute("aria-label","Event date (optional)");box.appendChild(date);
-      var hint=document.createElement("small");hint.textContent=item.proposed&&item.proposed.date?"Suggested date ("+(item.proposed.confidence||"high")+" confidence) from "+item.proposed.basis+": "+item.proposed.evidence+". "+(item.proposed.allDay?"All-day event detected (00:00–23:59). ":"")+"Confirm against the email before approving.":item.proposed&&item.proposed.ambiguous?"Ambiguous date expression or multiple possible dates. Enter the correct date manually.":"No unambiguous date detected. Confirm the date in the email; leaving it blank creates a notice only.";box.appendChild(hint);
+      var hint=document.createElement("small");hint.textContent=item.proposed&&item.proposed.date?"Suggested date ("+(item.proposed.confidence||"high")+" confidence) from "+item.proposed.basis+": "+item.proposed.evidence+". "+(item.proposed.allDay?"All-day event detected (00:00-23:59). ":"")+"Confirm against the email before approving.":item.proposed&&item.proposed.ambiguous?"Ambiguous date expression or multiple possible dates. Enter the correct date manually.":"No unambiguous date detected. Confirm the date in the email; leaving it blank creates a notice only.";box.appendChild(hint);
       var findActions=document.createElement("button");findActions.type="button";findActions.className="btn btn-ghost";findActions.textContent="Find actions & links";
       var actionPanel=document.createElement("div");actionPanel.className="school-card";actionPanel.hidden=true;
       box.appendChild(findActions);box.appendChild(actionPanel);
       findActions.addEventListener("click",async function(){
-        findActions.disabled=true;findActions.textContent="Analysing…";actionPanel.hidden=false;actionPanel.replaceChildren();
+        findActions.disabled=true;findActions.textContent="Analysing.";actionPanel.hidden=false;actionPanel.replaceChildren();
         function info(label,value){var p=document.createElement("p");var strong=document.createElement("strong");strong.textContent=label+": ";p.appendChild(strong);p.appendChild(document.createTextNode(value));actionPanel.appendChild(p);}
         try{
           var response=await fetch("/api/school-email/actions",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({id:item.id})});
           var result=await response.json();
           if(!response.ok)throw new Error(result.error||"Action analysis unavailable");
-          info("Suggested actions",result.actions.length?result.actions.join(" • "):"No clear action recognised. Check the original email.");
+          info("Suggested actions",result.actions.length?result.actions.join("  "):"No clear action recognised. Check the original email.");
           if(result.proposed.date)info("Suggested date",result.proposed.date+(result.proposed.time?" at "+result.proposed.time:""));
           if(result.proposed.ambiguous)info("Dates","Date or time may be ambiguous; check the email.");
           if(result.links.length){
@@ -963,11 +973,11 @@
             result.links.forEach(function(link){
               var p=document.createElement("p"),a=document.createElement("a");
               a.href=link.url;a.target="_blank";a.rel="noopener noreferrer";
-              a.textContent=(link.label||"Open link")+" ↗ ("+link.host+")";
+              a.textContent=(link.label||"Open link")+" ? ("+link.host+")";
               p.appendChild(a);actionPanel.appendChild(p);
             });
           }else info("Links","No accessible links found. Open original Gmail to check.");
-          if(result.attachments.length)info("Attachments",result.attachments.join(", ")+" — open in Gmail");
+          if(result.attachments.length)info("Attachments",result.attachments.join(", ")+" - open in Gmail");
           info("Note",result.note);
           if(result.suggestedTitle){
             var use=document.createElement("button");use.type="button";use.className="btn btn-ghost";use.textContent="Use suggested task title";
@@ -985,7 +995,7 @@
       var translation=document.createElement("div");translation.className="school-card";translation.hidden=true;
       box.appendChild(translate);box.appendChild(translation);
       translate.addEventListener("click",async function(){
-        translate.disabled=true;translate.textContent="Translating…";translation.hidden=false;translation.textContent="Processing selected school email securely…";
+        translate.disabled=true;translate.textContent="Translating.";translation.hidden=false;translation.textContent="Processing selected school email securely.";
         try{
           var response=await fetch("/api/school-email/summarize",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({id:item.id})});
           var result=await response.json();
@@ -995,9 +1005,9 @@
           line("English subject",result.englishSubject);
           line("Summary",result.summary);
           line("Action required",result.actionRequired?"Yes":"No");
-          if(result.actions.length)line("Suggested actions",result.actions.join(" • "));
-          if(result.dates.length)line("Dates mentioned",result.dates.join(" • "));
-          if(result.uncertainties.length)line("Check",result.uncertainties.join(" • "));
+          if(result.actions.length)line("Suggested actions",result.actions.join("  "));
+          if(result.dates.length)line("Dates mentioned",result.dates.join("  "));
+          if(result.uncertainties.length)line("Check",result.uncertainties.join("  "));
           line("Important",result.notice);
         }catch(err){translation.textContent=err.message;}
         finally{translate.disabled=false;translate.textContent="Summarise in English";}
@@ -1006,7 +1016,7 @@
       var analysisNote=document.createElement("small");analysisNote.textContent="Optional: reads this school email's text once to suggest a date. Its body is not saved.";
       box.appendChild(analyze);box.appendChild(analysisNote);
       analyze.addEventListener("click",async function(){
-        analyze.disabled=true;analysisNote.textContent="Checking selected email…";
+        analyze.disabled=true;analysisNote.textContent="Checking selected email.";
         try{
           var response=await fetch("/api/school-email/analyze",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({id:item.id})});
           var result=await response.json();
@@ -1014,7 +1024,7 @@
           if(!result.found){analysisNote.textContent=result.message||"No date or time found in this email.";return;}
           var p=result.proposed;
           if(p.date)date.value=p.date;
-          analysisNote.textContent=(p.ambiguous?"Ambiguous — verify manually. ":"")+(p.date?"Suggested date: "+p.date+". ":"")+(p.time?"Time: "+p.time+". ":"")+(p.allDay?"All-day event. ":"")+"From selected email body; confirm against the original before approval.";
+          analysisNote.textContent=(p.ambiguous?"Ambiguous - verify manually. ":"")+(p.date?"Suggested date: "+p.date+". ":"")+(p.time?"Time: "+p.time+". ":"")+(p.allDay?"All-day event. ":"")+"From selected email body; confirm against the original before approval.";
         }catch(err){analysisNote.textContent=err.message;}
         finally{analyze.disabled=false;}
       });
@@ -1040,7 +1050,7 @@
     });
   }
   gmailScan.addEventListener("click",async function(){
-    gmailScan.disabled=true;gmailScanStatus.textContent="Scanning school email senders…";
+    gmailScan.disabled=true;gmailScanStatus.textContent="Scanning school email senders.";
     try{
       var response=await fetch("/api/school-email/scan",{method:"POST"});
       var result=await response.json();
@@ -1099,12 +1109,77 @@
       });
     }catch(err){personalStatus.textContent=err.message;}
   }
+  var gmailSettings=document.getElementById("gmailSettings");
+  var personalSenderForm=document.getElementById("personalSenderForm");
+  var personalSenderInput=document.getElementById("personalSenderInput");
+  var personalSenderList=document.getElementById("personalSenderList");
+  var personalSenderStatus=document.getElementById("personalSenderStatus");
+  var personalSenderAdd=personalSenderForm.querySelector("button");
+  var personalSenderBusy=false;
+
+  async function updatePersonalSenders(method,sender){
+    if(personalSenderBusy)return;
+    personalSenderBusy=true;
+    personalSenderAdd.disabled=true;
+    personalSenderList.querySelectorAll("button").forEach(function(button){button.disabled=true;});
+    personalSenderStatus.textContent=method==="GET"?"Loading senders.":"Saving.";
+    try{
+      var options={method:method,cache:"no-store"};
+      if(method!=="GET"){
+        options.headers={"Content-Type":"application/json"};
+        options.body=JSON.stringify({sender:sender});
+      }
+      var response=await fetch("/api/personal-email/senders",options);
+      var result=await response.json();
+      if(!response.ok)throw new Error(result.error||"Could not load senders");
+      personalSenderList.replaceChildren();
+      result.senders.forEach(function(rule){
+        var item=document.createElement("li");
+        item.style.overflowWrap="anywhere";
+        var remove=document.createElement("button");
+        remove.type="button";
+        remove.className="btn btn-ghost";
+        remove.textContent="Remove";
+        remove.setAttribute("aria-label","Remove "+rule);
+        remove.addEventListener("click",function(){updatePersonalSenders("DELETE",rule);});
+        item.append(rule+" ",remove);
+        personalSenderList.appendChild(item);
+      });
+      if(method==="POST" && personalSenderInput.value.trim()===sender)personalSenderInput.value="";
+      personalSenderStatus.textContent=result.senders.length ? (method==="GET"?"":"Sender list saved.") :
+        "No senders selected. Add an address or domain to scan personal emails.";
+    }catch(err){
+      personalSenderStatus.textContent=err.message;
+    }finally{
+      personalSenderBusy=false;
+      personalSenderAdd.disabled=false;
+      personalSenderList.querySelectorAll("button").forEach(function(button){button.disabled=false;});
+    }
+  }
+  gmailSettings.addEventListener("toggle",function(){
+    if(gmailSettings.open)updatePersonalSenders("GET");
+  });
+  personalSenderForm.addEventListener("submit",function(event){
+    event.preventDefault();
+    updatePersonalSenders("POST",personalSenderInput.value.trim());
+  });
+  document.getElementById("managePersonalSenders").addEventListener("click",function(){
+    setView("school");
+    if(gmailSettings.open)updatePersonalSenders("GET");
+    else gmailSettings.open=true;
+    gmailSettings.scrollIntoView({block:"start"});
+  });
+
   personalScan.addEventListener("click",async function(){
-    personalScan.disabled=true;personalStatus.textContent="Scanning selected sender…";
+    personalScan.disabled=true;personalStatus.textContent="Scanning selected senders.";
     try{
       var response=await fetch("/api/personal-email/scan",{method:"POST"});
       var result=await response.json();
       if(!response.ok)throw new Error(result.error||"Scan failed");
+      if(result.emptySenderList){
+        personalStatus.textContent="Add a sender in Gmail settings before scanning.";
+        return;
+      }
       personalStatus.textContent="Checked "+result.checked+" messages; "+result.added+" new suggestions.";
       localStorage.setItem("almanacLastEmailScan",String(Date.now()));
       await reloadPersonalEmails();
@@ -1134,15 +1209,15 @@
     var list=document.getElementById("agendaTaskList"),count=document.getElementById("agendaTaskCount");
     if(!list)return;
     list.replaceChildren();
-    if(noticeLoadError){count.textContent="—";list.textContent=noticeLoadError;return;}
+    if(noticeLoadError){count.textContent="-";list.textContent=noticeLoadError;return;}
     var tasks=schoolNotices.filter(function(n){return n.status==="action";});
     count.textContent=String(tasks.length);
     if(!tasks.length){var empty=document.createElement("p");empty.className="hint";empty.textContent="No outstanding school actions.";list.appendChild(empty);return;}
     tasks.sort(function(a,b){return (a.dueDate||"9999").localeCompare(b.dueDate||"9999");});
     tasks.forEach(function(n){
       var row=document.createElement("div");row.style.cssText="border-top:1px solid var(--line);padding:12px 0;display:grid;gap:6px";
-      var title=document.createElement("strong");title.textContent="☐ "+n.title;row.appendChild(title);
-      var meta=document.createElement("small");meta.textContent=(n.child==="walter"?"Walter":"Ingalill")+" · School"+(n.dueDate?" · Due "+n.dueDate:" · No deadline specified");row.appendChild(meta);
+      var title=document.createElement("strong");title.textContent="? "+n.title;row.appendChild(title);
+      var meta=document.createElement("small");meta.textContent=(n.child==="walter"?"Walter":"Ingalill")+" � School"+(n.dueDate?" � Due "+n.dueDate:" � No deadline specified");row.appendChild(meta);
       var buttons=document.createElement("div");buttons.style.cssText="display:flex;gap:8px;flex-wrap:wrap";
       var done=document.createElement("button");done.type="button";done.className="btn btn-primary";done.textContent="Mark completed";
       done.addEventListener("click",async function(){
@@ -1168,7 +1243,7 @@
     visible.forEach(function(n){
       var box=document.createElement("div");
       box.style.cssText="border-top:1px solid var(--line);padding:12px 0";
-      var heading=document.createElement("strong");heading.textContent=(n.child==="walter"?"Walter":"Ingalill")+" · "+(n.status==="completed"?"Completed":n.status==="upcoming"?"Upcoming":"Action required");
+      var heading=document.createElement("strong");heading.textContent=(n.child==="walter"?"Walter":"Ingalill")+" � "+(n.status==="completed"?"Completed":n.status==="upcoming"?"Upcoming":"Action required");
       var title=document.createElement("p");title.textContent=n.title;
       title.style.margin="6px 0";
       box.appendChild(heading);box.appendChild(title);
@@ -1176,7 +1251,7 @@
       if(n.dueDate && n.details.indexOf(n.dueDate)<0 && n.details.indexOf(new Date(n.dueDate+"T12:00:00").toLocaleDateString("en-GB",{day:"numeric",month:"long",year:"numeric"}))<0){
         var due=document.createElement("p");due.textContent="Date: "+n.dueDate;box.appendChild(due);
       }
-      if(n.linkedEventId){var linked=document.createElement("p");linked.textContent="Linked to calendar · "+(n.recordType||"school event");box.appendChild(linked);}
+      if(n.linkedEventId){var linked=document.createElement("p");linked.textContent="Linked to calendar � "+(n.recordType||"school event");box.appendChild(linked);}
       var edit=document.createElement("button");edit.type="button";edit.className="btn btn-ghost";edit.textContent="Edit";edit.addEventListener("click",function(){openNotice(n);});box.appendChild(edit);
       if(n.status!=="completed"){
         var done=document.createElement("button");done.type="button";done.className="btn btn-ghost";done.style.marginLeft="8px";done.textContent="Mark completed";
@@ -1192,7 +1267,7 @@
     var current = el.noticeLink.value;
     el.noticeLink.innerHTML = '<option value="">No linked event</option>';
     Store.events.filter(function(ev){return schoolChild(ev)===el.noticeChild.value;}).forEach(function(ev){
-      var option=document.createElement("option");option.value=ev.id;option.textContent=displayTitle(ev)+" — "+ev.date;el.noticeLink.appendChild(option);
+      var option=document.createElement("option");option.value=ev.id;option.textContent=displayTitle(ev)+" - "+ev.date;el.noticeLink.appendChild(option);
     });
     el.noticeLink.value=selectedId||current||"";
   }
@@ -1266,7 +1341,7 @@
       var title = document.createElement("strong");
       title.textContent = displayTitle(ev);
       var meta = document.createElement("p");
-      meta.textContent = (child === "walter" ? "Walter" : "Ingalill") + " · " + (eventRangeLabel(ev) || dateToStr(item.occ)) + (ev.time ? " · "+ev.time : "");
+      meta.textContent = (child === "walter" ? "Walter" : "Ingalill") + " � " + (eventRangeLabel(ev) || dateToStr(item.occ)) + (ev.time ? " � "+ev.time : "");
       row.appendChild(title);row.appendChild(meta);
       if(ev.notes){var notes=document.createElement("p");notes.textContent=ev.notes;row.appendChild(notes);}
       var notice=schoolNotices.find(function(n){return n.linkedEventId===ev.id;});
@@ -1300,22 +1375,22 @@
     el.schoolCard.hidden = child === "all";
     if(el.schoolCard.hidden) return;
     if(child === "walter"){
-      el.schoolCardTitle.textContent = "Walter · Linnéskolan";
+      el.schoolCardTitle.textContent = "Walter � Linn�skolan";
       el.schoolCardContent.innerHTML =
-        '<p><strong>Confirmed date:</strong> Mathematics exam — Friday 27 November 2026, Chapter 2.</p>' +
+        '<p><strong>Confirmed date:</strong> Mathematics exam - Friday 27 November 2026, Chapter 2.</p>' +
         '<p><strong>Check dates / status:</strong></p><ul>' +
-        '<li>Physics assessment (13 November — past; confirm outcome).</li>' +
-        '<li>Personal finance assessment — date not confirmed.</li>' +
-        '<li>Spanish writing task / resit — date and status not confirmed.</li>' +
-        '<li>Mother-tongue application decision — confirm outcome.</li>' +
+        '<li>Physics assessment (13 November - past; confirm outcome).</li>' +
+        '<li>Personal finance assessment - date not confirmed.</li>' +
+        '<li>Spanish writing task / resit - date and status not confirmed.</li>' +
+        '<li>Mother-tongue application decision - confirm outcome.</li>' +
         '</ul>';
     } else {
-      el.schoolCardTitle.textContent = "Ingalill · Linnéskolan";
+      el.schoolCardTitle.textContent = "Ingalill � Linn�skolan";
       el.schoolCardContent.innerHTML =
         '<p><strong>Check dates / status:</strong></p><ul>' +
-        '<li>Mathematics exam announced 20 November 2026 — exam date not confirmed.</li>' +
-        '<li>Reading homework — teacher reported incomplete homework; follow up.</li>' +
-        '<li>Ugly Christmas Sweater Day — date not confirmed.</li>' +
+        '<li>Mathematics exam announced 20 November 2026 - exam date not confirmed.</li>' +
+        '<li>Reading homework - teacher reported incomplete homework; follow up.</li>' +
+        '<li>Ugly Christmas Sweater Day - date not confirmed.</li>' +
         '</ul>';
     }
   }
@@ -1348,8 +1423,8 @@
   function renderSyncStatus(mode){
     el.syncDot.className = "sync-dot";
     if(mode === "sync"){ el.syncDot.classList.add("on"); el.syncLabel.textContent = "Synced"; }
-    else if(mode === "offline"){ el.syncDot.classList.add("off"); el.syncLabel.textContent = "Offline — showing last synced copy"; }
-    else { el.syncLabel.textContent = "Connecting…"; }
+    else if(mode === "offline"){ el.syncDot.classList.add("off"); el.syncLabel.textContent = "Offline - showing last synced copy"; }
+    else { el.syncLabel.textContent = "Connecting."; }
   }
 
   /* ---------------- Agenda ---------------- */
@@ -1440,9 +1515,9 @@
     }
 
     return start.toLocaleDateString("en-GB", startOptions) +
-      " – " +
+      " - " +
       end.toLocaleDateString("en-GB", endOptions) +
-      " · " + days + " days";
+      " � " + days + " days";
   }
 
   function buildEventRow(ev, occ, today, isPast){
@@ -1476,7 +1551,7 @@
       statusButton.className="btn btn-ghost";
       statusButton.style.cssText="margin:8px 0 0 0;padding:6px 10px;font-size:12px";
       statusButton.textContent=schoolNotice.status==="completed"?"Reopen school task":"Mark completed";
-      statusButton.setAttribute("aria-label",statusButton.textContent+" — "+displayTitle(ev));
+      statusButton.setAttribute("aria-label",statusButton.textContent+" - "+displayTitle(ev));
       statusButton.addEventListener("click",async function(e){
         e.stopPropagation();
         statusButton.disabled=true;
@@ -1600,7 +1675,7 @@
       var dates = formatter.format(item.start);
       if(item.isRange){
         dates = formatter.formatRange ? formatter.formatRange(item.start, item.end) :
-          dates + " – " + formatter.format(item.end);
+          dates + " - " + formatter.format(item.end);
       }
       row.innerHTML = '<span class="marker" aria-hidden="true"></span><span class="name">' +
         escapeHtml(displayTitle(item.event)) + '</span><span class="dates">' + escapeHtml(dates) + '</span>';
@@ -1684,7 +1759,7 @@
         var item = document.createElement("div");
         item.className = "day-event-item";
         item.innerHTML =
-          '<div><div class="name">' + escapeHtml(displayTitle(ev)) + '</div><div class="meta">' + catLabel(eventCategory(ev)) + (eventRangeLabel(ev) ? " · " + escapeHtml(eventRangeLabel(ev)) : "") + (ev.time ? " · " + formatTime(ev.time) : "") + (ev.recurring ? " · Yearly" : "") + '</div></div>' +
+          '<div><div class="name">' + escapeHtml(displayTitle(ev)) + '</div><div class="meta">' + catLabel(eventCategory(ev)) + (eventRangeLabel(ev) ? " � " + escapeHtml(eventRangeLabel(ev)) : "") + (ev.time ? " � " + formatTime(ev.time) : "") + (ev.recurring ? " � Yearly" : "") + '</div></div>' +
           '<span class="dot" style="width:8px;height:8px;border-radius:50%;background:' + catColor(eventCategory(ev)) + ';flex:none;"></span>';
         item.addEventListener("click", function(){
           closeDayModal();
@@ -1853,7 +1928,7 @@
   }
   async function loadGeneralTasks(){
     try{generalTasks=await generalTaskRequest("");renderGeneralTasks();}
-    catch(err){document.getElementById("generalTaskCount").textContent="—";document.getElementById("generalTaskList").textContent="Unable to load tasks: "+err.message;}
+    catch(err){document.getElementById("generalTaskCount").textContent="-";document.getElementById("generalTaskList").textContent="Unable to load tasks: "+err.message;}
   }
   function renderGeneralTasks(){
     var list=document.getElementById("generalTaskList"),count=document.getElementById("generalTaskCount");
