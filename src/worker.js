@@ -41,6 +41,7 @@ async function handleApi(request, env, url) {
   if (segments[1] === "personal-email") return handlePersonalEmail(request, env, url, segments[2]);
   if (segments[1] === "school-email") return handleSchoolEmail(request, env, url, segments[2]);
   if (segments[1] === "school-notices") return handleSchoolNotices(request, env, segments[2]);
+  if (segments[1] === "tasks") return handleTasks(request, env, segments[2]);
   if (segments[1] !== "events") return json({ error: "Not found" }, 404);
 
   const id = segments[2];
@@ -97,12 +98,48 @@ async function handleApi(request, env, url) {
 
 
 
-/* Gmail OAuth is available only on the explicitly named development preview.
- * Cloudflare Access must protect that hostname, including /api/*.
+
+async function handleTasks(request, env, id) {
+  if (request.method === "GET" && !id) {
+    const {results}=await env.DB.prepare("SELECT * FROM tasks ORDER BY done ASC, created_at DESC").all();
+    return json(results.map(r=>({id:r.id,text:r.text,done:!!r.done,createdAt:r.created_at,completedAt:r.completed_at})));
+  }
+  if (request.method === "POST" && !id) {
+    const body=await request.json().catch(()=>({}));
+    const value=typeof body.text==="string"?body.text.trim():"";
+    if (!value || value.length>500) throw new ValidationError("Task must contain 1–500 characters");
+    const taskId=crypto.randomUUID(), now=Date.now();
+    await env.DB.prepare("INSERT INTO tasks (id,text,done,created_at,completed_at) VALUES (?,?,0,?,NULL)").bind(taskId,value,now).run();
+    return json({id:taskId,text:value,done:false,createdAt:now,completedAt:null},201);
+  }
+  if (request.method === "PUT" && id) {
+    const body=await request.json().catch(()=>({}));
+    if (typeof body.done!=="boolean") throw new ValidationError("done must be boolean");
+    const result=await env.DB.prepare("UPDATE tasks SET done=?,completed_at=? WHERE id=?").bind(body.done?1:0,body.done?Date.now():null,id).run();
+    return result.meta.changes?json({id,done:body.done}):json({error:"Task not found"},404);
+  }
+  if (request.method === "DELETE" && id) {
+    const result=await env.DB.prepare("DELETE FROM tasks WHERE id=?").bind(id).run();
+    return result.meta.changes?new Response(null,{status:204}):json({error:"Task not found"},404);
+  }
+  return json({error:"Method not allowed"},405);
+}
+
+/* Gmail OAuth is limited to the explicitly allowed development and production hosts.
+ * Cloudflare Access must protect both hostnames, including /api/*.
+ * Each deployment uses its own D1 database, OAuth credentials and callback.
  * Never expose OAuth credentials or tokens in JSON responses or logs.
  */
 const GMAIL_PREVIEW_HOST = "feature-school-family-calendar-almanac.brad11man.workers.dev";
-const GMAIL_REDIRECT = "https://" + GMAIL_PREVIEW_HOST + "/api/auth/google/callback";
+const GMAIL_PRODUCTION_HOST = "almanac.brad11man.workers.dev";
+const GMAIL_ALLOWED_HOSTS = new Set([GMAIL_PREVIEW_HOST, GMAIL_PRODUCTION_HOST]);
+function gmailAllowedOrigin(url) {
+  return url.protocol === "https:" && GMAIL_ALLOWED_HOSTS.has(url.hostname)
+    ? "https://" + url.hostname : null;
+}
+function gmailRedirect(url) {
+  return gmailAllowedOrigin(url) + "/api/auth/google/callback";
+}
 const GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.readonly";
 const encoder = new TextEncoder();
 function b64url(bytes) {
@@ -135,7 +172,7 @@ function gmailHtml(message, ok) {
   return new Response('<!doctype html><html lang="en"><meta charset="utf-8"><title>Almanac Gmail</title><body style="font-family:sans-serif;max-width:36rem;margin:4rem auto"><h1>Almanac Gmail</h1><p>'+safe+'</p><p><a href="/">Return to Almanac</a></p></body></html>', {status:ok?200:400,headers:{"content-type":"text/html; charset=utf-8","cache-control":"no-store","referrer-policy":"no-referrer"}});
 }
 async function handleGoogleAuth(request, env, url, action) {
-  if (url.hostname !== GMAIL_PREVIEW_HOST || url.protocol !== "https:") return json({error:"Not available on this deployment"},404);
+  if (!gmailAllowedOrigin(url)) return json({error:"Not available on this deployment"},404);
   if (!["GET","POST"].includes(request.method)) return json({error:"Method not allowed"},405);
   const configured = !!(env.GMAIL_CLIENT_ID && env.GMAIL_CLIENT_SECRET && env.GMAIL_TOKEN_KEY);
   if (action === "status" && request.method === "GET") {
@@ -159,7 +196,7 @@ async function handleGoogleAuth(request, env, url, action) {
       await env.DB.prepare("INSERT INTO gmail_oauth_state (nonce,expires_at) VALUES (?,?)").bind(nonce,Date.now()+600000).run();
       stage = "build_redirect";
       const params = new URLSearchParams({
-        client_id:env.GMAIL_CLIENT_ID,redirect_uri:GMAIL_REDIRECT,response_type:"code",
+        client_id:env.GMAIL_CLIENT_ID,redirect_uri:gmailRedirect(url),response_type:"code",
         scope:GMAIL_SCOPE,access_type:"offline",prompt:"consent",state:nonce
       });
       return new Response(null,{status:302,headers:{
@@ -187,7 +224,7 @@ async function handleGoogleAuth(request, env, url, action) {
     if (!code) return fail("Google did not return an authorisation code.");
     const tokenResponse=await fetch("https://oauth2.googleapis.com/token",{
       method:"POST",headers:{"content-type":"application/x-www-form-urlencoded"},
-      body:new URLSearchParams({code,client_id:env.GMAIL_CLIENT_ID,client_secret:env.GMAIL_CLIENT_SECRET,redirect_uri:GMAIL_REDIRECT,grant_type:"authorization_code"})
+      body:new URLSearchParams({code,client_id:env.GMAIL_CLIENT_ID,client_secret:env.GMAIL_CLIENT_SECRET,redirect_uri:gmailRedirect(url),grant_type:"authorization_code"})
     });
     if (!tokenResponse.ok) return fail("Google could not complete the connection. Check the OAuth configuration.");
     const token=await tokenResponse.json();
@@ -199,7 +236,7 @@ async function handleGoogleAuth(request, env, url, action) {
     return response;
   }
   if (action === "disconnect" && request.method === "POST") {
-    if (request.headers.get("origin") !== "https://"+GMAIL_PREVIEW_HOST) return json({error:"Invalid request origin"},403);
+    if (request.headers.get("origin") !== gmailAllowedOrigin(url)) return json({error:"Invalid request origin"},403);
     await ensureGmailTables(env.DB);
     // Disconnect locally; revoke Google access separately in Google Account settings if desired.
     await env.DB.prepare("DELETE FROM gmail_connection WHERE id=1").run();
@@ -209,7 +246,7 @@ async function handleGoogleAuth(request, env, url, action) {
 }
 
 
-/* Development-only manual Gmail scan. Never import without explicit approval.
+/* Manual Gmail scan for approved deployment hosts. Never import without explicit approval.
  * Store only selected message metadata, not full message bodies or tokens.
  */
 async function gmailAccessToken(env) {
@@ -344,8 +381,8 @@ function schoolEmailRow(row) {
     status:row.review_status,proposed:suggestDateTime(row.subject,row.snippet,row.received_at)};
 }
 async function handleSchoolEmail(request,env,url,action) {
-  if(url.hostname!==GMAIL_PREVIEW_HOST||url.protocol!=="https:")return json({error:"Not available"},404);
-  if(request.method!=="GET" && request.headers.get("origin")!=="https://"+GMAIL_PREVIEW_HOST)
+  if(!gmailAllowedOrigin(url))return json({error:"Not available"},404);
+  if(request.method!=="GET" && request.headers.get("origin")!==gmailAllowedOrigin(url))
     return json({error:"Invalid request origin"},403);
   await ensureSchoolEmail(env.DB);
   if(action==="suggestions" && request.method==="GET"){
@@ -570,8 +607,8 @@ async function ensurePersonalEmail(db){
   )`).run();
 }
 async function handlePersonalEmail(request,env,url,action){
-  if(url.hostname!==GMAIL_PREVIEW_HOST||url.protocol!=="https:")return json({error:"Not available"},404);
-  if(request.method!=="GET" && request.headers.get("origin")!=="https://"+GMAIL_PREVIEW_HOST)
+  if(!gmailAllowedOrigin(url))return json({error:"Not available"},404);
+  if(request.method!=="GET" && request.headers.get("origin")!==gmailAllowedOrigin(url))
     return json({error:"Invalid request origin"},403);
   await ensurePersonalEmail(env.DB);
   if(action==="suggestions" && request.method==="GET"){
