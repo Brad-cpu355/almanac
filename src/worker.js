@@ -59,10 +59,10 @@ async function handleApi(request, env, url) {
     const newId = crypto.randomUUID();
     const createdAt = Date.now();
     await env.DB.prepare(
-      `INSERT INTO events (id, title, date, time, category, recurring, notes, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO events (id, title, date, time, category, recurring, notes, created_at, end_date)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
-      .bind(newId, ev.title, ev.date, ev.time, ev.category, ev.recurring ? 1 : 0, ev.notes, createdAt)
+      .bind(newId, ev.title, ev.date, ev.time, ev.category, ev.recurring ? 1 : 0, ev.notes, createdAt, ev.endDate)
       .run();
     return json({ id: newId, ...ev, createdAt }, 201);
   }
@@ -70,10 +70,10 @@ async function handleApi(request, env, url) {
   if (method === "PUT" && id) {
     const ev = normalize(await request.json());
     const result = await env.DB.prepare(
-      `UPDATE events SET title = ?, date = ?, time = ?, category = ?, recurring = ?, notes = ?
+      `UPDATE events SET title = ?, date = ?, time = ?, category = ?, recurring = ?, notes = ?, end_date = ?
        WHERE id = ?`
     )
-      .bind(ev.title, ev.date, ev.time, ev.category, ev.recurring ? 1 : 0, ev.notes, id)
+      .bind(ev.title, ev.date, ev.time, ev.category, ev.recurring ? 1 : 0, ev.notes, ev.endDate, id)
       .run();
     if (result.meta.changes === 0) return json({ error: "Event not found" }, 404);
     // Keep the linked notice date consistent when a calendar event is edited.
@@ -758,7 +758,7 @@ async function handleSchoolNotices(request, env, id) {
       // The notice owns status; the linked event owns its calendar appearance.
       // A dated notice may update its linked event date, without changing the title.
       if(n.linkedEventId && n.dueDate){
-        await env.DB.prepare("UPDATE events SET date=? WHERE id=?").bind(n.dueDate,n.linkedEventId).run();
+        await env.DB.prepare("UPDATE events SET end_date=CASE WHEN end_date IS NULL THEN NULL ELSE date(?, printf('%+d days', CAST(julianday(end_date)-julianday(date) AS INTEGER))) END, date=? WHERE id=?").bind(n.dueDate,n.dueDate,n.linkedEventId).run();
       }
     }
     return result.meta.changes ? json({id,...n}) : json({error:"Notice not found"},404);
@@ -778,11 +778,35 @@ function normalize(body) {
   if (typeof body.date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(body.date)) {
     throw new ValidationError("Date must be in YYYY-MM-DD form");
   }
+  const parsedStart = new Date(body.date + "T00:00:00Z");
+  if (Number.isNaN(parsedStart.getTime()) || parsedStart.toISOString().slice(0,10) !== body.date) {
+    throw new ValidationError("Start date is not a valid calendar date");
+  }
+  let endDate = null;
+  if (body.endDate !== undefined && body.endDate !== null && body.endDate !== "") {
+    if (typeof body.endDate !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(body.endDate)) {
+      throw new ValidationError("End date must be in YYYY-MM-DD form");
+    }
+    const parsed = new Date(body.endDate + "T00:00:00Z");
+    if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0,10) !== body.endDate) {
+      throw new ValidationError("End date is not a valid calendar date");
+    }
+    if (body.endDate < body.date) {
+      throw new ValidationError("End date cannot be before start date");
+    }
+    if (body.endDate !== body.date) {
+      endDate = body.endDate;
+    }
+    if (endDate && body.recurring) {
+      throw new ValidationError("Multi-day events cannot repeat annually");
+    }
+  }
   const category = CATEGORIES.has(body.category) ? body.category : "other";
   const time = typeof body.time === "string" && /^\d{2}:\d{2}$/.test(body.time) ? body.time : "";
   return {
     title: body.title.trim().slice(0, 120),
     date: body.date,
+    endDate,
     time,
     category,
     recurring: !!body.recurring,
@@ -795,6 +819,7 @@ function rowToEvent(row) {
     id: row.id,
     title: row.title,
     date: row.date,
+    endDate: row.end_date || null,
     time: row.time,
     category: row.category,
     recurring: !!row.recurring,

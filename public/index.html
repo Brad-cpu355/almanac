@@ -622,7 +622,9 @@
   function nextOccurrence(ev, ref){
     var base = strToDate(ev.date);
     if(!ev.recurring){
-      return base.getTime() >= ref.getTime() ? base : null;
+      var end = strToDate(ev.endDate || ev.date);
+      if(end.getTime() < ref.getTime()) return null;
+      return base.getTime() >= ref.getTime() ? base : new Date(ref.getTime());
     }
     var occ = new Date(ref.getFullYear(), base.getMonth(), base.getDate());
     if(occ.getTime() < ref.getTime()){
@@ -633,7 +635,10 @@
 
   function occursOn(ev, d){
     var base = strToDate(ev.date);
-    if(!ev.recurring){ return sameDay(base, d); }
+    if(!ev.recurring){
+      var end = strToDate(ev.endDate || ev.date);
+      return d.getTime() >= base.getTime() && d.getTime() <= end.getTime();
+    }
     return base.getMonth()===d.getMonth() && base.getDate()===d.getDate() && d.getFullYear() >= base.getFullYear();
   }
 
@@ -1469,18 +1474,31 @@
     var events = filteredEvents(Store.events);
 
     var eventsByDate = {};
+    var yearStart = new Date(UI.year, 0, 1);
+    var yearEnd = new Date(UI.year, 11, 31);
+
     events.forEach(function(ev){
       var base = strToDate(ev.date);
-      var d;
+
       if(ev.recurring){
         if(UI.year < base.getFullYear()) return;
-        d = new Date(UI.year, base.getMonth(), base.getDate());
-      } else {
-        if(base.getFullYear() !== UI.year) return;
-        d = base;
+        var d = new Date(UI.year, base.getMonth(), base.getDate());
+        var key = dateToStr(d);
+        (eventsByDate[key] = eventsByDate[key] || []).push(ev);
+        return;
       }
-      var key = dateToStr(d);
-      (eventsByDate[key] = eventsByDate[key] || []).push(ev);
+
+      var end = strToDate(ev.endDate || ev.date);
+
+      if(end < yearStart || base > yearEnd) return;
+
+      var first = base < yearStart ? yearStart : base;
+      var last = end > yearEnd ? yearEnd : end;
+
+      for(var d = new Date(first.getTime()); d <= last; d.setDate(d.getDate()+1)){
+        var key = dateToStr(d);
+        (eventsByDate[key] = eventsByDate[key] || []).push(ev);
+      }
     });
 
     el.monthGrid.innerHTML = "";

@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS events (
   category    TEXT NOT NULL DEFAULT 'other', -- personal | work | family | birthday | other
   recurring   INTEGER NOT NULL DEFAULT 0,    -- 1 = repeats every year on month/day
   notes       TEXT NOT NULL DEFAULT '',
+  end_date    TEXT DEFAULT NULL,       -- Optional inclusive end date
   created_at  INTEGER NOT NULL           -- epoch millis
 );
 
