@@ -169,6 +169,24 @@
   .school-card .btn{margin-top:4px;}
   .school-card .hint{font-size:.73rem;color:var(--ink-faint);margin:10px 0 0;}
   .school-tag{font-size:.68rem;font-weight:600;border-radius:999px;padding:2px 9px;background:var(--cat-family-tint);color:var(--cat-family);}
+  /* Responsive text wrapping */
+  .school-card, .event-row, .day-event-item{
+    min-width:0;
+    overflow-wrap:anywhere;
+    word-break:normal;
+  }
+  .school-card p, .school-card li, .school-card a{
+    max-width:100%;
+    overflow-wrap:anywhere;
+  }
+  .event-row > *, .day-event-item > *{
+    min-width:0;
+    overflow-wrap:anywhere;
+  }
+  .month-card{
+    scroll-margin-top:20px;
+  }
+
   /* ---------- Agenda ---------- */
   .month-group{ margin-bottom:6px; }
   .month-header{
@@ -762,7 +780,10 @@
     el.viewPersonal.classList.toggle("active", v==="personal");
     el.mainFilters.hidden = v==="school" || v==="personal";
     if(v==="school") renderSchoolTab();
-    if(v==="year") renderYear();
+    if(v==="year"){
+      renderYear();
+      scrollToCurrentMonth();
+    }
   }
   el.segButtons.forEach(function(b){ b.addEventListener("click", function(){ setView(b.dataset.view); }); });
 
@@ -1393,6 +1414,23 @@
   }
 
   /* ---------------- Year view ---------------- */
+  function scrollToCurrentMonth(){
+    var today = todayDate();
+    if(UI.view !== "year" || UI.year !== today.getFullYear()) return;
+
+    requestAnimationFrame(function(){
+      requestAnimationFrame(function(){
+        if(UI.view !== "year" || UI.year !== today.getFullYear()) return;
+        var card = el.monthGrid.querySelector(
+          '[data-month="' + today.getMonth() + '"]'
+        );
+        if(card){
+          card.scrollIntoView({behavior:"instant",block:"start",inline:"nearest"});
+        }
+      });
+    });
+  }
+
   function renderYear(){
     el.yearLabel.textContent = UI.year;
     var today = todayDate();
@@ -1417,6 +1455,7 @@
     for(var m=0; m<12; m++){
       var card = document.createElement("div");
       card.className = "month-card";
+      card.dataset.month = String(m);
       var monthDate = new Date(UI.year, m, 1);
       var offset = (monthDate.getDay() + 6) % 7;
       var daysInMonth = new Date(UI.year, m+1, 0).getDate();
@@ -1455,7 +1494,7 @@
 
   el.yearPrev.addEventListener("click", function(){ UI.year--; renderYear(); });
   el.yearNext.addEventListener("click", function(){ UI.year++; renderYear(); });
-  el.yearJump.addEventListener("click", function(){ UI.year = new Date().getFullYear(); renderYear(); });
+  el.yearJump.addEventListener("click", function(){ UI.year = new Date().getFullYear(); renderYear(); scrollToCurrentMonth(); });
 
   /* ---------------- Day modal ---------------- */
   function openDayModal(dateStr){
