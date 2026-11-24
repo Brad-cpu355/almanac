@@ -68,7 +68,33 @@ async function handleApi(request, env, url) {
   }
 
   if (method === "PUT" && id) {
-    const ev = normalize(await request.json());
+    const body = await request.json();
+
+    // Preserve duration when an older client omits endDate.
+    if (body && body.endDate === undefined) {
+      const existing = await env.DB.prepare(
+        "SELECT date, end_date FROM events WHERE id = ?"
+      ).bind(id).first();
+
+      if (!existing) {
+        return json({ error: "Event not found" }, 404);
+      }
+
+      if (existing.end_date) {
+        const validated = normalize(body);
+        const duration =
+          Date.parse(existing.end_date + "T00:00:00Z") -
+          Date.parse(existing.date + "T00:00:00Z");
+
+        const shiftedEnd = new Date(
+          Date.parse(validated.date + "T00:00:00Z") + duration
+        );
+
+        body.endDate = shiftedEnd.toISOString().slice(0, 10);
+      }
+    }
+
+    const ev = normalize(body);
     const result = await env.DB.prepare(
       `UPDATE events SET title = ?, date = ?, time = ?, category = ?, recurring = ?, notes = ?, end_date = ?
        WHERE id = ?`

@@ -519,13 +519,17 @@
       </div>
       <div class="row-2">
         <div class="field">
-          <label for="f-date">Date</label>
+          <label for="f-date">Start date</label>
           <input type="date" id="f-date" required>
         </div>
         <div class="field">
-          <label for="f-time">Time (optional)</label>
-          <input type="time" id="f-time">
+          <label for="f-end-date">End date (optional)</label>
+          <input type="date" id="f-end-date">
         </div>
+      </div>
+      <div class="field">
+        <label for="f-time">Time (optional)</label>
+        <input type="time" id="f-time">
       </div>
       <div class="field">
         <label for="f-school">School / child (optional)</label>
@@ -775,6 +779,7 @@
     eventSaveBtn: document.getElementById("eventSaveBtn"),
     fTitle: document.getElementById("f-title"),
     fDate: document.getElementById("f-date"),
+    fEndDate: document.getElementById("f-end-date"),
     fTime: document.getElementById("f-time"),
     fRecurring: document.getElementById("f-recurring"),
     fNotes: document.getElementById("f-notes"),
@@ -1238,7 +1243,7 @@
       var title = document.createElement("strong");
       title.textContent = displayTitle(ev);
       var meta = document.createElement("p");
-      meta.textContent = (child === "walter" ? "Walter" : "Ingalill") + " · " + dateToStr(item.occ) + (ev.time ? " · "+ev.time : "");
+      meta.textContent = (child === "walter" ? "Walter" : "Ingalill") + " · " + (eventRangeLabel(ev) || dateToStr(item.occ)) + (ev.time ? " · "+ev.time : "");
       row.appendChild(title);row.appendChild(meta);
       if(ev.notes){var notes=document.createElement("p");notes.textContent=ev.notes;row.appendChild(notes);}
       var notice=schoolNotices.find(function(n){return n.linkedEventId===ev.id;});
@@ -1393,6 +1398,30 @@
     }
   }
 
+  function eventRangeLabel(ev){
+    if(!ev.endDate || ev.endDate === ev.date) return "";
+
+    var start = strToDate(ev.date);
+    var end = strToDate(ev.endDate);
+
+    var days = Math.round(
+      (Date.parse(ev.endDate + "T00:00:00Z") -
+       Date.parse(ev.date + "T00:00:00Z")) / 86400000
+    ) + 1;
+
+    var startOptions = {day:"numeric", month:"short"};
+    var endOptions = {day:"numeric", month:"short", year:"numeric"};
+
+    if(start.getFullYear() !== end.getFullYear()){
+      startOptions.year = "numeric";
+    }
+
+    return start.toLocaleDateString("en-GB", startOptions) +
+      " – " +
+      end.toLocaleDateString("en-GB", endOptions) +
+      " · " + days + " days";
+  }
+
   function buildEventRow(ev, occ, today, isPast){
     var row = document.createElement("div");
     row.className = "event-row" + (isPast ? " past" : "") + (sameDay(occ, today) && !isPast ? " is-today" : "");
@@ -1413,6 +1442,7 @@
       '</div>' +
       '<div class="event-main">' +
         '<div class="event-top"><span class="event-title">' + escapeHtml(displayTitle(ev)) + '</span>' + (ev.time ? '<span class="event-time mono">' + formatTime(ev.time) + '</span>' : '') + '</div>' +
+        (eventRangeLabel(ev) ? '<div class="event-notes">' + escapeHtml(eventRangeLabel(ev)) + '</div>' : '') +
         (ev.notes ? '<div class="event-notes">' + escapeHtml(ev.notes) + '</div>' : '') +
         '<div class="chip-row">' + chips + '</div>' +
       '</div>';
@@ -1564,7 +1594,7 @@
         var item = document.createElement("div");
         item.className = "day-event-item";
         item.innerHTML =
-          '<div><div class="name">' + escapeHtml(displayTitle(ev)) + '</div><div class="meta">' + catLabel(eventCategory(ev)) + (ev.time ? " · " + formatTime(ev.time) : "") + (ev.recurring ? " · Yearly" : "") + '</div></div>' +
+          '<div><div class="name">' + escapeHtml(displayTitle(ev)) + '</div><div class="meta">' + catLabel(eventCategory(ev)) + (eventRangeLabel(ev) ? " · " + escapeHtml(eventRangeLabel(ev)) : "") + (ev.time ? " · " + formatTime(ev.time) : "") + (ev.recurring ? " · Yearly" : "") + '</div></div>' +
           '<span class="dot" style="width:8px;height:8px;border-radius:50%;background:' + catColor(eventCategory(ev)) + ';flex:none;"></span>';
         item.addEventListener("click", function(){
           closeDayModal();
@@ -1626,6 +1656,7 @@
       el.fTitle.value = displayTitle(ev) || "";
       selectedSchool = schoolChild(ev);
       el.fDate.value = ev.date || dateToStr(todayDate());
+      el.fEndDate.value = ev.endDate || "";
       el.fTime.value = ev.time || "";
       el.fRecurring.checked = !!ev.recurring;
       el.fNotes.value = ev.notes || "";
@@ -1639,6 +1670,7 @@
     if(selectedSchool || (opts.mode !== "edit" && (UI.filter === "school" || UI.view === "school"))) selectedCategory = "school";
     el.fSchool.value = selectedSchool;
     buildCatPills();
+    el.fEndDate.min = el.fDate.value;
     el.eventOverlay.hidden = false;
     setTimeout(function(){ el.fTitle.focus(); }, 30);
   }
@@ -1655,13 +1687,34 @@
     }
   });
 
+  el.fDate.addEventListener("change", function(){
+    el.fEndDate.min = el.fDate.value;
+  });
+
   el.eventForm.addEventListener("submit", async function(e){
     e.preventDefault();
     var title = el.fTitle.value.trim();
     if(!title){ el.errTitle.classList.add("show"); el.fTitle.focus(); return; }
+
+    var startDate = el.fDate.value || dateToStr(todayDate());
+    var endDate = el.fEndDate.value || null;
+
+    if(endDate && endDate < startDate){
+      showToast("End date cannot be before start date.", true);
+      el.fEndDate.focus();
+      return;
+    }
+
+    if(endDate === startDate) endDate = null;
+
+    if(endDate && el.fRecurring.checked){
+      showToast("Multi-day events cannot repeat annually.", true);
+      return;
+    }
     var data = {
       title: (el.fSchool.value ? SCHOOL_PREFIX[el.fSchool.value] : "") + title,
-      date: el.fDate.value || dateToStr(todayDate()),
+      date: startDate,
+      endDate: endDate,
       time: el.fTime.value || "",
       category: el.fSchool.value ? "school" : selectedCategory,
       recurring: !!el.fRecurring.checked,
