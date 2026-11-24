@@ -32,6 +32,7 @@
     --cat-personal:#2F5233; --cat-personal-tint:#E4ECE1;
     --cat-work:#33507D;     --cat-work-tint:#E2E7F0;
     --cat-family:#7C4270;   --cat-family-tint:#F1E3EE;
+    --cat-school:#087E8B;   --cat-school-tint:#DDF2F4;
     --cat-birthday:#9C6B0A; --cat-birthday-tint:#F5EAD3;
     --cat-other:#6A6558;    --cat-other-tint:#EAE8E0;
   }
@@ -57,6 +58,7 @@
       --cat-personal:#8FCB93; --cat-personal-tint:#20301F;
       --cat-work:#93AEDD;     --cat-work-tint:#1D2537;
       --cat-family:#DE9CCB;   --cat-family-tint:#331F2E;
+    --cat-school:#70D6DF;   --cat-school-tint:#16383D;
       --cat-birthday:#E0B24F; --cat-birthday-tint:#362A11;
       --cat-other:#B3AE9E;    --cat-other-tint:#272620;
     }
@@ -71,6 +73,7 @@
     --cat-personal:#8FCB93; --cat-personal-tint:#20301F;
     --cat-work:#93AEDD;     --cat-work-tint:#1D2537;
     --cat-family:#DE9CCB;   --cat-family-tint:#331F2E;
+    --cat-school:#70D6DF;   --cat-school-tint:#16383D;
     --cat-birthday:#E0B24F; --cat-birthday-tint:#362A11;
     --cat-other:#B3AE9E;    --cat-other-tint:#272620;
   }
@@ -333,6 +336,7 @@
   <div class="filter-bar" id="mainFilters" aria-label="Filter calendar events">
     <span class="filter-label">Show</span>
     <button type="button" class="filter-btn active" data-filter="all" aria-pressed="true">All</button>
+    <button type="button" class="filter-btn" data-filter="school" aria-pressed="false">School</button>
     <button type="button" class="filter-btn" data-filter="walter" aria-pressed="false">Walter</button>
     <button type="button" class="filter-btn" data-filter="ingalill" aria-pressed="false">Ingalill</button>
     <button type="button" class="filter-btn" data-filter="other" aria-pressed="false">Other events</button>
@@ -518,10 +522,11 @@
     personal: { label:"Personal", var:"--cat-personal", tintVar:"--cat-personal-tint" },
     work:     { label:"Work",     var:"--cat-work",     tintVar:"--cat-work-tint" },
     family:   { label:"Family",   var:"--cat-family",   tintVar:"--cat-family-tint" },
+    school:   { label:"School", var:"--cat-school", tintVar:"--cat-school-tint" },
     birthday: { label:"Birthday", var:"--cat-birthday", tintVar:"--cat-birthday-tint" },
     other:    { label:"Other",    var:"--cat-other",    tintVar:"--cat-other-tint" }
   };
-  var CATEGORY_ORDER = ["personal","work","family","birthday","other"];
+  var CATEGORY_ORDER = ["personal","work","family","school","birthday","other"];
   // School association is encoded in the title so it works with the existing
   // /api/events schema, without a database migration. Existing events are unchanged.
   var SCHOOL_PREFIX = {walter:"[Walter · School] ", ingalill:"[Ingalill · School] "};
@@ -531,12 +536,16 @@
     if(title.indexOf(SCHOOL_PREFIX.ingalill) === 0) return "ingalill";
     return "";
   }
+  function eventCategory(ev){
+    return schoolChild(ev) ? "school" : (ev.category || "other");
+  }
   function displayTitle(ev){
     var child = schoolChild(ev);
     return child ? ev.title.slice(SCHOOL_PREFIX[child].length) : ev.title;
   }
   function matchesFilter(ev){
     var child = schoolChild(ev);
+    if(UI.filter === "school") return eventCategory(ev) === "school";
     return UI.filter === "all" || (UI.filter === "other" ? !child : child === UI.filter);
   }
   function filteredEvents(events){return events.filter(matchesFilter);}
@@ -657,7 +666,7 @@
   (function loadUI(){
     try{
       var raw = localStorage.getItem("almanac-ui");
-      if(raw){ var p = JSON.parse(raw); if(p.view === "agenda" || p.view === "year" || p.view === "school" || p.view === "personal") UI.view = p.view; if(["all","walter","ingalill","other"].indexOf(p.filter) !== -1) UI.filter = p.filter; }
+      if(raw){ var p = JSON.parse(raw); if(p.view === "agenda" || p.view === "year" || p.view === "school" || p.view === "personal") UI.view = p.view; if(["all","school","walter","ingalill","other"].indexOf(p.filter) !== -1) UI.filter = p.filter; }
     }catch(e){}
   })();
   function saveUI(){ try{ localStorage.setItem("almanac-ui", JSON.stringify({view:UI.view,filter:UI.filter})); }catch(e){} }
@@ -1247,7 +1256,7 @@
     btn.addEventListener("click",function(){setFilter(btn.dataset.filter);});
   });
   el.schoolAddBtn.addEventListener("click",function(){
-    openEventModal({mode:"add",school:UI.filter});
+    openEventModal({mode:"add",school:(UI.filter === "walter" || UI.filter === "ingalill") ? UI.filter : ""});
   });
 
   /* ---------------- Sync status ---------------- */
@@ -1333,7 +1342,7 @@
     var daysDiff = Math.round((occ.getTime()-today.getTime())/86400000);
     var rel = isPast ? "" : relLabel(daysDiff);
 
-    var chips = '<span class="chip" style="background:' + catTint(ev.category) + ';color:' + catColor(ev.category) + ';"><span class="dot" style="background:' + catColor(ev.category) + ';"></span>' + catLabel(ev.category) + '</span>';
+    var chips = '<span class="chip" style="background:' + catTint(eventCategory(ev)) + ';color:' + catColor(eventCategory(ev)) + ';"><span class="dot" style="background:' + catColor(eventCategory(ev)) + ';"></span>' + catLabel(eventCategory(ev)) + '</span>';
     if(schoolChild(ev)) chips += '<span class="school-tag">' + (schoolChild(ev)==="walter" ? "Walter" : "Ingalill") + '</span>';
     var schoolNotice=schoolNotices.find(function(n){return n.linkedEventId===ev.id;});
     if(schoolNotice) chips += '<span class="chip">' + escapeHtml(schoolNotice.status==="completed"?"Completed":schoolNotice.status==="upcoming"?"Upcoming":"Action required") + '</span>';
@@ -1426,7 +1435,7 @@
         if(dayEvents.length){
           html += '<div class="day-dots">';
           var shown = dayEvents.slice(0,3);
-          shown.forEach(function(ev){ html += '<span class="dot" style="background:' + catColor(ev.category) + ';"></span>'; });
+          shown.forEach(function(ev){ html += '<span class="dot" style="background:' + catColor(eventCategory(ev)) + ';"></span>'; });
           if(dayEvents.length > 3) html += '<span class="more">+' + (dayEvents.length-3) + '</span>';
           html += '</div>';
         } else {
@@ -1466,8 +1475,8 @@
         var item = document.createElement("div");
         item.className = "day-event-item";
         item.innerHTML =
-          '<div><div class="name">' + escapeHtml(displayTitle(ev)) + '</div><div class="meta">' + catLabel(ev.category) + (ev.time ? " · " + formatTime(ev.time) : "") + (ev.recurring ? " · Yearly" : "") + '</div></div>' +
-          '<span class="dot" style="width:8px;height:8px;border-radius:50%;background:' + catColor(ev.category) + ';flex:none;"></span>';
+          '<div><div class="name">' + escapeHtml(displayTitle(ev)) + '</div><div class="meta">' + catLabel(eventCategory(ev)) + (ev.time ? " · " + formatTime(ev.time) : "") + (ev.recurring ? " · Yearly" : "") + '</div></div>' +
+          '<span class="dot" style="width:8px;height:8px;border-radius:50%;background:' + catColor(eventCategory(ev)) + ';flex:none;"></span>';
         item.addEventListener("click", function(){
           closeDayModal();
           openEventModal({mode:"edit", event:ev});
@@ -1498,6 +1507,10 @@
       pill.innerHTML = '<span class="dot" style="background:' + catColor(key) + ';"></span>' + catLabel(key);
       pill.addEventListener("click", function(){
         selectedCategory = key;
+        if(key !== "school"){
+          el.fSchool.value = "";
+          selectedSchool = "";
+        }
         updateCatPills();
       });
       el.catPills.appendChild(pill);
@@ -1527,13 +1540,14 @@
       el.fTime.value = ev.time || "";
       el.fRecurring.checked = !!ev.recurring;
       el.fNotes.value = ev.notes || "";
-      selectedCategory = ev.category || "personal";
+      selectedCategory = eventCategory(ev);
       el.eventDelete.style.display = "";
     } else {
       el.eventPanelTitle.textContent = "New event";
       el.fDate.value = opts.date || dateToStr(todayDate());
       el.eventDelete.style.display = "none";
     }
+    if(selectedSchool || (opts.mode !== "edit" && (UI.filter === "school" || UI.view === "school"))) selectedCategory = "school";
     el.fSchool.value = selectedSchool;
     buildCatPills();
     el.eventOverlay.hidden = false;
@@ -1545,6 +1559,13 @@
 
   el.addBtn.addEventListener("click", function(){ openEventModal({mode:"add"}); });
 
+  el.fSchool.addEventListener("change", function(){
+    if(el.fSchool.value){
+      selectedCategory = "school";
+      updateCatPills();
+    }
+  });
+
   el.eventForm.addEventListener("submit", async function(e){
     e.preventDefault();
     var title = el.fTitle.value.trim();
@@ -1553,7 +1574,7 @@
       title: (el.fSchool.value ? SCHOOL_PREFIX[el.fSchool.value] : "") + title,
       date: el.fDate.value || dateToStr(todayDate()),
       time: el.fTime.value || "",
-      category: selectedCategory,
+      category: el.fSchool.value ? "school" : selectedCategory,
       recurring: !!el.fRecurring.checked,
       notes: el.fNotes.value.trim()
     };

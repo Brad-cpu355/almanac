@@ -12,7 +12,7 @@
  * purpose.
  */
 
-const CATEGORIES = new Set(["personal", "work", "family", "birthday", "other"]);
+const CATEGORIES = new Set(["personal", "work", "family", "school", "birthday", "other"]);
 
 class ValidationError extends Error {}
 
@@ -579,7 +579,7 @@ async function handleSchoolEmail(request,env,url,action) {
         .bind(noticeId,body.child,title,"From reviewed school email: "+row.sender,"action",date,Date.now()).run();
       if(eventId){
         await env.DB.prepare("INSERT INTO events (id,title,date,time,category,recurring,notes,created_at) VALUES (?,?,?,?,?,?,?,?)")
-          .bind(eventId,(body.child==="walter"?"[Walter · School] ":"[Ingalill · School] ")+title,date,"","family",0,"From approved school email",Date.now()).run();
+          .bind(eventId,(body.child==="walter"?"[Walter · School] ":"[Ingalill · School] ")+title,date,"","school",0,"From approved school email",Date.now()).run();
         await env.DB.prepare("INSERT INTO school_notice_links (notice_id,event_id,record_type,source) VALUES (?,?,?,?)")
           .bind(noticeId,eventId,kind,"Gmail (reviewed)").run();
       }
