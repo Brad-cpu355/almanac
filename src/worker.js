@@ -624,7 +624,53 @@ async function handleSchoolEmail(request,env,url,action) {
 /* Personal email review is opt-in, sender-specific, and metadata-only.
  * No message body, snippet or attachment is fetched or stored.
  */
-const PERSONAL_SENDER="maria.rosenqvist@malmo.se";
+const DEFAULT_PERSONAL_SENDER="maria.rosenqvist@malmo.se";
+const PERSONAL_SENDER_LIMIT=20;
+
+function normalizePersonalSender(value){
+  const rule=typeof value==="string" ? value.trim().toLowerCase().replace(/^@/,"") : "";
+  const domain="(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?";
+  const pattern=new RegExp("^(?:[a-z0-9_+%-]+(?:\\.[a-z0-9_+%-]+)*@)?"+domain+"$");
+  if(rule.length>254 || !pattern.test(rule))throw new ValidationError("Enter an email address or a domain such as example.com");
+  return rule;
+}
+
+function matchesPersonalSender(header,rules){
+  const mailbox=(header.trim().match(/<([^<>]+)>\s*$/)?.[1] || header).trim().toLowerCase();
+  const parts=mailbox.split("@");
+  return parts.length===2 && !/[\s<>,]/.test(mailbox) && (rules.includes(mailbox) || rules.includes(parts[1]));
+}
+
+async function personalSenderRules(db){
+  await db.prepare(`CREATE TABLE IF NOT EXISTS personal_email_settings (
+    id INTEGER PRIMARY KEY CHECK (id=1), senders TEXT NOT NULL
+  )`).run();
+  const row=await db.prepare("SELECT senders FROM personal_email_settings WHERE id=1").first();
+  return row ? JSON.parse(row.senders) : [DEFAULT_PERSONAL_SENDER];
+}
+
+async function handlePersonalSenders(request,db){
+  const rules=await personalSenderRules(db);
+  if(request.method==="GET")return json({senders:rules});
+  if(request.method!=="POST" && request.method!=="DELETE")return json({error:"Method not allowed"},405);
+  const body=await request.json().catch(()=>null);
+  const sender=normalizePersonalSender(body?.sender);
+  await db.prepare("INSERT OR IGNORE INTO personal_email_settings (id,senders) VALUES (1,?)")
+    .bind(JSON.stringify([DEFAULT_PERSONAL_SENDER])).run();
+  if(request.method==="POST"){
+    await db.prepare(`UPDATE personal_email_settings SET senders=json_insert(senders,'$[#]',?)
+      WHERE id=1 AND json_array_length(senders)<? AND NOT EXISTS (SELECT 1 FROM json_each(senders) WHERE value=?)`)
+      .bind(sender,PERSONAL_SENDER_LIMIT,sender).run();
+  }else{
+    await db.prepare(`UPDATE personal_email_settings SET senders=(
+      SELECT json_group_array(value) FROM json_each(senders) WHERE value<>?
+    ) WHERE id=1`).bind(sender).run();
+  }
+  const updated=await personalSenderRules(db);
+  if(request.method==="POST" && !updated.includes(sender))
+    throw new ValidationError("You can save up to "+PERSONAL_SENDER_LIMIT+" senders");
+  return json({senders:updated});
+}
 async function ensurePersonalEmail(db){
   await db.prepare(`CREATE TABLE IF NOT EXISTS personal_email_suggestions (
     message_id TEXT PRIMARY KEY, subject TEXT NOT NULL, received_at INTEGER NOT NULL,
@@ -636,14 +682,17 @@ async function handlePersonalEmail(request,env,url,action){
   if(!gmailAllowedOrigin(url))return json({error:"Not available"},404);
   if(request.method!=="GET" && request.headers.get("origin")!==gmailAllowedOrigin(url))
     return json({error:"Invalid request origin"},403);
+  if(action==="senders")return handlePersonalSenders(request,env.DB);
   await ensurePersonalEmail(env.DB);
   if(action==="suggestions" && request.method==="GET"){
     const {results}=await env.DB.prepare("SELECT message_id,subject,received_at,review_status FROM personal_email_suggestions ORDER BY received_at DESC LIMIT 100").all();
     return json(results.map(r=>({id:r.message_id,subject:r.subject,receivedAt:r.received_at,status:r.review_status,proposed:suggestDateTime(r.subject,"",r.received_at)})));
   }
   if(action==="scan" && request.method==="POST"){
+    const rules=await personalSenderRules(env.DB);
+    if(!rules.length)return json({added:0,skipped:0,checked:0,emptySenderList:true});
     const token=await gmailAccessToken(env);
-    const query="newer_than:30d from:"+PERSONAL_SENDER;
+    const query="newer_than:30d {"+rules.map(rule=>"from:"+rule).join(" ")+"}";
     const list=await gmailRequest(token,"messages?"+new URLSearchParams({q:query,maxResults:"40"}));
     let added=0,skipped=0;
     for(const item of list.messages||[]){
@@ -651,8 +700,8 @@ async function handlePersonalEmail(request,env,url,action){
       if(existing){skipped++;continue;}
       const message=await gmailRequest(token,"messages/"+encodeURIComponent(item.id)+"?format=metadata&metadataHeaders=Subject&metadataHeaders=From");
       const headers=message.payload?.headers||[];
-      const sender=(headers.find(h=>h.name.toLowerCase()==="from")?.value||"").toLowerCase();
-      if(!sender.includes(PERSONAL_SENDER)){skipped++;continue;}
+      const sender=headers.find(h=>h.name.toLowerCase()==="from")?.value||"";
+      if(!matchesPersonalSender(sender,rules)){skipped++;continue;}
       const subject=(headers.find(h=>h.name.toLowerCase()==="subject")?.value||"(No subject)").slice(0,160);
       await env.DB.prepare("INSERT OR IGNORE INTO personal_email_suggestions (message_id,subject,received_at,created_at) VALUES (?,?,?,?)")
         .bind(item.id,subject,Number(message.internalDate)||Date.now(),Date.now()).run();
