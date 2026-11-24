@@ -12,7 +12,7 @@
  * purpose.
  */
 
-const CATEGORIES = new Set(["personal", "work", "family", "school", "birthday", "other"]);
+const CATEGORIES = new Set(["personal", "work", "family", "school", "lotta", "birthday", "other"]);
 
 class ValidationError extends Error {}
 
