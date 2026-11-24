@@ -278,25 +278,48 @@
     color:var(--accent); font-size:0.78rem; font-weight:600; cursor:pointer; text-align:center;
   }
 
-  .month-grid{ display:grid; grid-template-columns:repeat(3, 1fr); gap:14px; }
-  @media (max-width:640px){ .month-grid{ grid-template-columns:repeat(2, 1fr); } }
-  @media (max-width:420px){ .month-grid{ grid-template-columns:1fr; } }
-  .month-card{ background:var(--surface); border:1px solid var(--line); border-radius:var(--radius); padding:12px; }
+  .month-grid{ display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); align-items:start; gap:14px; }
+  @media (max-width:640px){ .month-grid{ grid-template-columns:repeat(2, minmax(0, 1fr)); } }
+  @media (max-width:420px){ .month-grid{ grid-template-columns:minmax(0, 1fr); gap:10px; } }
+  .month-card{ min-width:0; background:var(--surface); border:1px solid var(--line); border-radius:var(--radius); padding:12px; }
   .month-card h3{ font-size:0.92rem; font-weight:600; font-style:italic; margin:0 0 8px; color:var(--ink); }
-  .weekday-row, .day-grid{ display:grid; grid-template-columns:repeat(7, 1fr); }
+  .weekday-row, .month-week{ display:grid; grid-template-columns:repeat(7, minmax(0, 1fr)); }
   .weekday-row span{ font-size:0.6rem; text-align:center; color:var(--ink-faint); font-family:"IBM Plex Mono", monospace; }
+  .month-week{ padding-bottom:3px; }
   .day-cell{
-    position:relative; aspect-ratio:1;
+    grid-row:1; min-width:0; min-height:32px; padding:0; background:transparent;
     display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px;
     font-family:"IBM Plex Mono", monospace; font-size:0.7rem; color:var(--ink-soft);
     border-radius:6px; cursor:pointer; border:1px solid transparent;
   }
   .day-cell:hover{ background:var(--surface-2); }
   .day-cell.today{ border-color:var(--accent); color:var(--accent); font-weight:600; }
-  .day-cell.empty{ cursor:default; visibility:hidden; }
   .day-dots{ display:flex; gap:2px; height:5px; align-items:center; }
   .day-dots .dot{ width:4px; height:4px; border-radius:50%; }
   .day-dots .more{ font-size:0.5rem; color:var(--ink-faint); }
+  .year-range{
+    height:5px; margin-top:3px; background:var(--event-color);
+  }
+  .year-range.starts{ border-radius:5px 0 0 5px; margin-left:3px; }
+  .year-range.ends{ border-top-right-radius:5px; border-bottom-right-radius:5px; margin-right:3px; }
+  .month-events{ margin-top:8px; padding-top:5px; border-top:1px solid var(--line); }
+  .month-event, .month-events summary{
+    color:var(--ink-soft); font-size:0.73rem; min-height:28px; cursor:pointer;
+  }
+  .month-event{
+    width:100%; display:grid; grid-template-columns:5px 1fr; align-items:baseline; gap:2px 7px;
+    text-align:left; background:transparent; border:0; border-radius:6px; padding:4px 2px;
+  }
+  .month-event:hover{ background:var(--surface-2); }
+  .month-event .marker{ width:5px; height:5px; border-radius:50%; background:var(--event-color); }
+  .month-event .name{ color:var(--ink); overflow-wrap:anywhere; font-weight:600; }
+  .month-event .dates{ grid-column:2; }
+  .month-events summary{ padding:6px 2px 0; }
+  @media (max-width:420px){
+    .day-cell{ min-height:38px; }
+    .month-event{ grid-template-columns:5px minmax(0, 1fr) auto; align-items:center; }
+    .month-event .dates{ grid-column:3; }
+  }
 
   /* ---------- Modal ---------- */
   .overlay{ position:fixed; inset:0; background:rgba(15,18,12,0.42); display:flex; align-items:flex-end; justify-content:center; z-index:50; }
@@ -1498,78 +1521,145 @@
     });
   }
 
+  function buildMonthWeek(monthStart, monthEnd, firstDay, singleDays, ranges, today){
+    var week = document.createElement("div");
+    week.className = "month-week";
+    var year = monthStart.getFullYear();
+    var month = monthStart.getMonth();
+    var weekStart = new Date(year, month, firstDay);
+    var weekEnd = new Date(year, month, firstDay + 6);
+
+    for(var day = Math.max(1, firstDay); day <= Math.min(monthEnd.getDate(), firstDay + 6); day++){
+      var date = new Date(year, month, day);
+      var key = dateToStr(date);
+      var singleEvents = singleDays.get(key) || [];
+      var count = singleEvents.length + ranges.filter(function(item){ return item.start <= date && item.end >= date; }).length;
+      var cell = document.createElement("button");
+      cell.type = "button";
+      cell.className = "day-cell" + (sameDay(date, today) ? " today" : "");
+      cell.dataset.date = key;
+      cell.style.gridColumn = day - firstDay + 1;
+      cell.setAttribute("aria-label", date.toLocaleDateString(undefined, {dateStyle:"full"}) +
+        (count ? ", " + count + (count === 1 ? " event" : " events") : ""));
+      if(sameDay(date, today)) cell.setAttribute("aria-current", "date");
+      var dots = singleEvents.slice(0, 3).map(function(item){
+        return '<span class="dot" style="background:' + item.color + '"></span>';
+      }).join("");
+      if(singleEvents.length > 3) dots += '<span class="more">+' + (singleEvents.length - 3) + '</span>';
+      cell.innerHTML = '<span>' + day + '</span><span class="day-dots" aria-hidden="true">' + dots + '</span>';
+      cell.addEventListener("click", function(){ openDayModal(this.dataset.date); });
+      week.appendChild(cell);
+    }
+
+    var laneEnds = [];
+    ranges.forEach(function(item){
+      var start = new Date(Math.max(item.start, monthStart, weekStart));
+      var end = new Date(Math.min(item.end, monthEnd, weekEnd));
+      if(start > end) return;
+      var firstColumn = start.getDate() - firstDay + 1;
+      var lastColumn = end.getDate() - firstDay + 1;
+      var lane = laneEnds.findIndex(function(last){ return last < firstColumn; });
+      if(lane === -1) lane = laneEnds.length;
+      laneEnds[lane] = lastColumn;
+
+      var bar = document.createElement("span");
+      bar.className = "year-range" + (sameDay(start, item.start) ? " starts" : "") +
+        (sameDay(end, item.end) ? " ends" : "");
+      bar.style.gridColumn = firstColumn + " / " + (lastColumn + 1);
+      bar.style.gridRow = lane + 2;
+      bar.style.setProperty("--event-color", item.color);
+      bar.title = displayTitle(item.event);
+      bar.setAttribute("aria-hidden", "true");
+      week.appendChild(bar);
+    });
+    return week;
+  }
+
+  function buildMonthSummary(items, today, expanded){
+    var section = document.createElement("div");
+    section.className = "month-events";
+    var ordered = items.slice().sort(function(a,b){
+      return Number(b.isRange) - Number(a.isRange) || Number(a.end < today) - Number(b.end < today);
+    });
+    var more = document.createElement("details");
+    more.open = expanded;
+    if(ordered.length > 3){
+      var toggle = document.createElement("summary");
+      toggle.textContent = (ordered.length - 3) + " more " + (ordered.length === 4 ? "event" : "events");
+      more.appendChild(toggle);
+    }
+
+    var shortDate = new Intl.DateTimeFormat("en-GB", {day:"numeric", month:"short"});
+    var fullDate = new Intl.DateTimeFormat("en-GB", {day:"numeric", month:"short", year:"numeric"});
+    ordered.forEach(function(item, index){
+      var row = document.createElement("button");
+      row.type = "button";
+      row.className = "month-event";
+      row.style.setProperty("--event-color", item.color);
+      var formatter = item.start.getFullYear() === item.end.getFullYear() ? shortDate : fullDate;
+      var dates = formatter.format(item.start);
+      if(item.isRange){
+        dates = formatter.formatRange ? formatter.formatRange(item.start, item.end) :
+          dates + " – " + formatter.format(item.end);
+      }
+      row.innerHTML = '<span class="marker" aria-hidden="true"></span><span class="name">' +
+        escapeHtml(displayTitle(item.event)) + '</span><span class="dates">' + escapeHtml(dates) + '</span>';
+      row.addEventListener("click", function(){ openEventModal({mode:"edit", event:item.event}); });
+      (index < 3 ? section : more).appendChild(row);
+    });
+    if(ordered.length > 3) section.appendChild(more);
+    return section;
+  }
+
   function renderYear(){
     el.yearLabel.textContent = UI.year;
     var today = todayDate();
-    var events = filteredEvents(Store.events);
-
-    var eventsByDate = {};
-    var yearStart = new Date(UI.year, 0, 1);
-    var yearEnd = new Date(UI.year, 11, 31);
-
-    events.forEach(function(ev){
-      var base = strToDate(ev.date);
-
-      if(ev.recurring){
-        if(UI.year < base.getFullYear()) return;
-        var d = new Date(UI.year, base.getMonth(), base.getDate());
-        var key = dateToStr(d);
-        (eventsByDate[key] = eventsByDate[key] || []).push(ev);
-        return;
-      }
-
+    var singleDays = new Map();
+    var items = [];
+    filteredEvents(Store.events).forEach(function(ev){
+      var start = strToDate(ev.date);
       var end = strToDate(ev.endDate || ev.date);
-
-      if(end < yearStart || base > yearEnd) return;
-
-      var first = base < yearStart ? yearStart : base;
-      var last = end > yearEnd ? yearEnd : end;
-
-      for(var d = new Date(first.getTime()); d <= last; d.setDate(d.getDate()+1)){
-        var key = dateToStr(d);
-        (eventsByDate[key] = eventsByDate[key] || []).push(ev);
+      if(ev.recurring){
+        start = new Date(UI.year, start.getMonth(), start.getDate());
+        if(!occursOn(ev, start)) return;
+        end = start;
+      }
+      var item = {event:ev, start:start, end:end, isRange:end > start, color:catColor(eventCategory(ev))};
+      items.push(item);
+      if(!item.isRange){
+        var key = dateToStr(start);
+        if(!singleDays.has(key)) singleDays.set(key, []);
+        singleDays.get(key).push(item);
       }
     });
+    items.sort(function(a,b){ return a.start - b.start || (a.event.time || "").localeCompare(b.event.time || ""); });
 
+    var expanded = new Set();
+    if(el.monthGrid.dataset.year === String(UI.year)){
+      el.monthGrid.querySelectorAll(".month-events details[open]").forEach(function(details){
+        expanded.add(details.closest(".month-card").dataset.month);
+      });
+    }
+    el.monthGrid.dataset.year = String(UI.year);
     el.monthGrid.innerHTML = "";
-    for(var m=0; m<12; m++){
+    for(var m = 0; m < 12; m++){
       var card = document.createElement("div");
       card.className = "month-card";
       card.dataset.month = String(m);
-      var monthDate = new Date(UI.year, m, 1);
-      var offset = (monthDate.getDay() + 6) % 7;
-      var daysInMonth = new Date(UI.year, m+1, 0).getDate();
+      var monthStart = new Date(UI.year, m, 1);
+      var monthEnd = new Date(UI.year, m + 1, 0);
+      var offset = (monthStart.getDay() + 6) % 7;
+      var monthItems = items.filter(function(item){ return item.start <= monthEnd && item.end >= monthStart; });
+      var ranges = monthItems.filter(function(item){ return item.isRange; });
 
-      var html = '<h3 class="serif">' + monthDate.toLocaleDateString(undefined,{month:"long"}) + '</h3>';
-      html += '<div class="weekday-row"><span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span><span>S</span></div>';
-      html += '<div class="day-grid">';
-      for(var i=0;i<offset;i++){ html += '<div class="day-cell empty"></div>'; }
-      for(var day=1; day<=daysInMonth; day++){
-        var cellDate = new Date(UI.year, m, day);
-        var key = dateToStr(cellDate);
-        var dayEvents = eventsByDate[key] || [];
-        var isToday = sameDay(cellDate, today);
-        html += '<div class="day-cell' + (isToday ? " today" : "") + '" data-date="' + key + '">';
-        html += '<span>' + day + '</span>';
-        if(dayEvents.length){
-          html += '<div class="day-dots">';
-          var shown = dayEvents.slice(0,3);
-          shown.forEach(function(ev){ html += '<span class="dot" style="background:' + catColor(eventCategory(ev)) + ';"></span>'; });
-          if(dayEvents.length > 3) html += '<span class="more">+' + (dayEvents.length-3) + '</span>';
-          html += '</div>';
-        } else {
-          html += '<div class="day-dots"></div>';
-        }
-        html += '</div>';
+      card.innerHTML = '<h3 class="serif">' + monthStart.toLocaleDateString(undefined, {month:"long"}) + '</h3>' +
+        '<div class="weekday-row" aria-hidden="true"><span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span><span>S</span></div>';
+      for(var firstDay = 1 - offset; firstDay <= monthEnd.getDate(); firstDay += 7){
+        card.appendChild(buildMonthWeek(monthStart, monthEnd, firstDay, singleDays, ranges, today));
       }
-      html += '</div>';
-      card.innerHTML = html;
+      if(monthItems.length) card.appendChild(buildMonthSummary(monthItems, today, expanded.has(String(m))));
       el.monthGrid.appendChild(card);
     }
-
-    el.monthGrid.querySelectorAll(".day-cell[data-date]").forEach(function(cell){
-      cell.addEventListener("click", function(){ openDayModal(cell.dataset.date); });
-    });
   }
 
   el.yearPrev.addEventListener("click", function(){ UI.year--; renderYear(); });
