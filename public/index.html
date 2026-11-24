@@ -169,6 +169,33 @@
   .school-card .btn{margin-top:4px;}
   .school-card .hint{font-size:.73rem;color:var(--ink-faint);margin:10px 0 0;}
   .school-tag{font-size:.68rem;font-weight:600;border-radius:999px;padding:2px 9px;background:var(--cat-family-tint);color:var(--cat-family);}
+  /* Mobile layout containment */
+  .app, main, .view{
+    min-width:0;
+    max-width:100%;
+  }
+  .topbar-actions{
+    max-width:100%;
+    flex-wrap:wrap;
+  }
+  button.school-card{
+    display:block;
+    width:100%;
+    max-width:100%;
+    min-width:0;
+    white-space:normal;
+  }
+  button.school-card > p,
+  button.school-card > strong{
+    display:block;
+    width:100%;
+    max-width:100%;
+    white-space:normal;
+    word-wrap:break-word;
+    overflow-wrap:anywhere;
+    word-break:break-word;
+  }
+
   /* Responsive text wrapping */
   .school-card, .event-row, .day-event-item{
     min-width:0;
@@ -1261,7 +1288,11 @@
   }
   function refreshCalendar(){
     renderAgenda(filteredEvents(Store.events));
-    if(UI.view === "year") renderYear();
+    if(UI.view === "year"){
+      var previousScroll = window.scrollY;
+      renderYear();
+      window.scrollTo(0, previousScroll);
+    }
     if(UI.view === "school") renderSchoolTab();
   }
   function setFilter(filter){
@@ -1425,7 +1456,8 @@
           '[data-month="' + today.getMonth() + '"]'
         );
         if(card){
-          card.scrollIntoView({behavior:"instant",block:"start",inline:"nearest"});
+                    var target = card.getBoundingClientRect().top + window.scrollY - 20;
+          window.scrollTo(0, Math.max(0, target));
         }
       });
     });
@@ -1701,7 +1733,9 @@
   });
   setView(UI.view);
   setFilter(UI.filter);
-  Store.init();
+  Store.init().then(function(){
+    if(UI.view === "year") scrollToCurrentMonth();
+  });
 })();
 </script>
 </body>
