@@ -205,6 +205,12 @@ async function handleTasks(request, env, id) {
   }
   if (request.method === "PUT" && id) {
     const body=await request.json().catch(()=>({}));
+    if(Object.prototype.hasOwnProperty.call(body,"text")){
+      const text = typeof body.text === "string" ? body.text.trim() : "";
+      if(!text || text.length > 500) throw new ValidationError("Task must contain 1–500 characters");
+      const updated = await env.DB.prepare("UPDATE tasks SET text=? WHERE id=?").bind(text,id).run();
+      return updated.meta.changes ? json({id,text}) : json({error:"Task not found"},404);
+    }
     if(Object.prototype.hasOwnProperty.call(body,"dueDate")){
       const dueDate = optionalDate(body.dueDate);
       const updated = await env.DB.prepare("UPDATE tasks SET due_date=? WHERE id=?").bind(dueDate,id).run();

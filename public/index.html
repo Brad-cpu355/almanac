@@ -2250,7 +2250,56 @@
         finally{due.disabled=false;}
       });
       dueLabel.appendChild(due);
-      row.append(toggle,label,dueLabel,del);
+      var edit = document.createElement("button");
+      edit.type = "button";
+      edit.className = "btn btn-ghost";
+      edit.textContent = "Edit";
+      edit.setAttribute("aria-label", "Edit task: " + task.text);
+      var form = document.createElement("form");
+      form.hidden = true;
+      form.style.cssText = "flex-basis:100%;display:flex;flex-wrap:wrap;gap:8px";
+      var input = document.createElement("input");
+      input.type = "text";
+      input.required = true;
+      input.maxLength = 500;
+      input.setAttribute("aria-label", "Task title");
+      input.style.cssText = "flex:1;min-width:120px";
+      var save = document.createElement("button");
+      save.type = "submit";
+      save.className = "btn btn-primary";
+      save.textContent = "Save";
+      var cancel = document.createElement("button");
+      cancel.type = "button";
+      cancel.className = "btn btn-ghost";
+      cancel.textContent = "Cancel";
+      edit.addEventListener("click", function(){
+        input.value = task.text;
+        form.hidden = false;
+        edit.hidden = true;
+        input.focus();
+        input.select();
+      });
+      cancel.addEventListener("click", function(){
+        form.hidden = true;
+        edit.hidden = false;
+        edit.focus();
+      });
+      form.addEventListener("submit", async function(event){
+        event.preventDefault();
+        var title = input.value.trim();
+        if(!title){ showToast("Enter a task title", true); input.focus(); return; }
+        save.disabled = cancel.disabled = true;
+        try{
+          await generalTaskRequest("/"+encodeURIComponent(task.id), {
+            method:"PUT", headers:{"Content-Type":"application/json"}, body:JSON.stringify({text:title})
+          });
+          await loadGeneralTasks();
+          showToast("Task updated");
+        }catch(err){ showToast(err.message,true); }
+        finally{ save.disabled = cancel.disabled = false; }
+      });
+      form.append(input,save,cancel);
+      row.append(toggle,label,dueLabel,edit,del,form);
       list.appendChild(row);
     });
   }
