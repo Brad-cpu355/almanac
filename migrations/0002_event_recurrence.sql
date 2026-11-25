@@ -1,0 +1,2 @@
+ALTER TABLE events ADD COLUMN repeat_frequency TEXT DEFAULT NULL;
+ALTER TABLE events ADD COLUMN repeat_until TEXT DEFAULT NULL;

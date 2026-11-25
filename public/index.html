@@ -597,10 +597,18 @@
         <div class="cat-pills" id="catPills"></div>
       </div>
       <div class="field">
-        <div class="check-row">
-          <input type="checkbox" id="f-recurring">
-          <label for="f-recurring">Repeats every year on this date</label>
-        </div>
+        <label for="f-recurring">Repeat</label>
+        <select id="f-recurring">
+          <option value="">Never</option>
+          <option value="weekly">Weekly</option>
+          <option value="monthly">Monthly</option>
+          <option value="yearly">Yearly</option>
+        </select>
+        <p class="hint" id="repeatMonthlyHint" hidden>Months without this day are skipped.</p>
+      </div>
+      <div class="field" id="repeatUntilField" hidden>
+        <label for="f-repeat-until">Repeat until (optional, inclusive)</label>
+        <input type="date" id="f-repeat-until">
       </div>
       <div class="field">
         <label for="f-notes">Notes (optional)</label>
@@ -678,27 +686,44 @@
     return "";
   }
 
-  function nextOccurrence(ev, ref){
-    var base = strToDate(ev.date);
-    if(!ev.recurring){
-      var end = strToDate(ev.endDate || ev.date);
-      if(end.getTime() < ref.getTime()) return null;
-      return base.getTime() >= ref.getTime() ? base : new Date(ref.getTime());
-    }
-    var occ = new Date(ref.getFullYear(), base.getMonth(), base.getDate());
-    if(occ.getTime() < ref.getTime()){
-      occ = new Date(ref.getFullYear()+1, base.getMonth(), base.getDate());
-    }
-    return occ;
+  function repeatMode(ev){
+    return ev.repeat || (ev.recurring ? "yearly" : "");
   }
 
-  function occursOn(ev, d){
-    var base = strToDate(ev.date);
-    if(!ev.recurring){
+  function nextOccurrence(ev, ref){
+    var start = strToDate(ev.date);
+    var mode = repeatMode(ev);
+    if(!mode){
       var end = strToDate(ev.endDate || ev.date);
-      return d.getTime() >= base.getTime() && d.getTime() <= end.getTime();
+      return end < ref ? null : start >= ref ? start : new Date(ref);
     }
-    return base.getMonth()===d.getMonth() && base.getDate()===d.getDate() && d.getFullYear() >= base.getFullYear();
+    var lower = start > ref ? start : ref;
+    var limit = ev.repeatUntil ? strToDate(ev.repeatUntil) : null;
+    if(limit && lower > limit) return null;
+    var day = start.getDate();
+    var occurrence;
+    if(mode === "weekly"){
+      var difference = (start.getDay() - lower.getDay() + 7) % 7;
+      occurrence = new Date(lower.getFullYear(), lower.getMonth(), lower.getDate() + difference);
+    }else{
+      var yearly = mode === "yearly";
+      var year = lower.getFullYear();
+      var month = yearly ? start.getMonth() : lower.getMonth();
+      // Skip months without the original day, including non-leap years.
+      do{
+        occurrence = new Date(year, month, day);
+        if(occurrence >= lower && occurrence.getDate() === day) break;
+        if(yearly) year++;
+        else month++;
+      }while(!limit || new Date(year, month, 1) <= limit);
+      if(occurrence < lower || occurrence.getDate() !== day) return null;
+    }
+    return limit && occurrence > limit ? null : occurrence;
+  }
+
+  function occursOn(ev, date){
+    var occurrence = nextOccurrence(ev, date);
+    return occurrence !== null && sameDay(occurrence, date);
   }
 
   /* ---------------- Store: talks to the Worker's /api/events ---------------- */
@@ -837,6 +862,7 @@
     fEndDate: document.getElementById("f-end-date"),
     fTime: document.getElementById("f-time"),
     fRecurring: document.getElementById("f-recurring"),
+    fRepeatUntil: document.getElementById("f-repeat-until"),
     fNotes: document.getElementById("f-notes"),
     fSchool: document.getElementById("f-school"),
     catPills: document.getElementById("catPills"),
@@ -1663,7 +1689,7 @@
     if(schoolChild(ev)) chips += '<span class="school-tag">' + (schoolChild(ev)==="walter" ? "Walter" : "Ingalill") + '</span>';
     var schoolNotice=schoolNotices.find(function(n){return n.linkedEventId===ev.id;});
     if(schoolNotice) chips += '<span class="chip">' + escapeHtml(schoolNotice.status==="completed"?"Completed":schoolNotice.status==="upcoming"?"Upcoming":"Action required") + '</span>';
-    if(ev.recurring) chips += '<span class="chip recur">Yearly</span>';
+    if(repeatMode(ev)) chips += '<span class="chip recur">' + repeatMode(ev) + '</span>';
 
     row.innerHTML =
       '<div class="rail">' +
@@ -1827,11 +1853,20 @@
     filteredEvents(Store.events).forEach(function(ev){
       var start = strToDate(ev.date);
       var end = strToDate(ev.endDate || ev.date);
-      if(ev.recurring){
-        start = new Date(UI.year, start.getMonth(), start.getDate());
-        if(!occursOn(ev, start)) return;
+      var mode = repeatMode(ev);
+      var yearEnd = new Date(UI.year, 11, 31);
+      if(mode){
+        start = nextOccurrence(ev, new Date(UI.year, 0, 1));
         end = start;
       }
+      while(start && start <= yearEnd){
+        addYearItem(ev, start, end);
+        if(!mode) break;
+        start = nextOccurrence(ev, new Date(start.getFullYear(), start.getMonth(), start.getDate()+1));
+        end = start;
+      }
+    });
+    function addYearItem(ev, start, end){
       var item = {event:ev, start:start, end:end, isRange:end > start, color:catColor(eventCategory(ev))};
       items.push(item);
       if(!item.isRange){
@@ -1839,7 +1874,7 @@
         if(!singleDays.has(key)) singleDays.set(key, []);
         singleDays.get(key).push(item);
       }
-    });
+    }
     items.sort(function(a,b){ return a.start - b.start || (a.event.time || "").localeCompare(b.event.time || ""); });
 
     var expanded = new Set();
@@ -1892,7 +1927,7 @@
         var item = document.createElement("div");
         item.className = "day-event-item";
         item.innerHTML =
-          '<div><div class="name">' + escapeHtml(displayTitle(ev)) + '</div><div class="meta">' + catLabel(eventCategory(ev)) + (eventRangeLabel(ev) ? " · " + escapeHtml(eventRangeLabel(ev)) : "") + (ev.time ? " · " + formatTime(ev.time) : "") + (ev.recurring ? " · Yearly" : "") + '</div></div>' +
+          '<div><div class="name">' + escapeHtml(displayTitle(ev)) + '</div><div class="meta">' + catLabel(eventCategory(ev)) + (eventRangeLabel(ev) ? " · " + escapeHtml(eventRangeLabel(ev)) : "") + (ev.time ? " · " + formatTime(ev.time) : "") + (repeatMode(ev) ? " · " + repeatMode(ev) : "") + '</div></div>' +
           '<span class="dot" style="width:8px;height:8px;border-radius:50%;background:' + catColor(eventCategory(ev)) + ';flex:none;"></span>';
         item.addEventListener("click", function(){
           closeDayModal();
@@ -1956,7 +1991,8 @@
       el.fDate.value = ev.date || dateToStr(todayDate());
       el.fEndDate.value = ev.endDate || "";
       el.fTime.value = ev.time || "";
-      el.fRecurring.checked = !!ev.recurring;
+      el.fRecurring.value = repeatMode(ev);
+      el.fRepeatUntil.value = ev.repeatUntil || "";
       el.fNotes.value = ev.notes || "";
       selectedCategory = eventCategory(ev);
       el.eventDelete.style.display = "";
@@ -1969,6 +2005,7 @@
     el.fSchool.value = selectedSchool;
     buildCatPills();
     el.fEndDate.min = el.fDate.value;
+    updateRepeatFields();
     el.eventOverlay.hidden = false;
     setTimeout(function(){ el.fTitle.focus(); }, 30);
   }
@@ -1985,8 +2022,18 @@
     }
   });
 
+  function updateRepeatFields(){
+    var repeating = !!el.fRecurring.value;
+    document.getElementById("repeatUntilField").hidden = !repeating;
+    document.getElementById("repeatMonthlyHint").hidden = el.fRecurring.value !== "monthly";
+    el.fRepeatUntil.disabled = !repeating;
+    el.fRepeatUntil.min = el.fDate.value;
+  }
+
+  el.fRecurring.addEventListener("change", updateRepeatFields);
   el.fDate.addEventListener("change", function(){
     el.fEndDate.min = el.fDate.value;
+    updateRepeatFields();
   });
 
   el.eventForm.addEventListener("submit", async function(e){
@@ -2005,8 +2052,8 @@
 
     if(endDate === startDate) endDate = null;
 
-    if(endDate && el.fRecurring.checked){
-      showToast("Multi-day events cannot repeat annually.", true);
+    if(endDate && el.fRecurring.value){
+      showToast("Repeats are available for single-day events.", true);
       return;
     }
     var data = {
@@ -2015,7 +2062,9 @@
       endDate: endDate,
       time: el.fTime.value || "",
       category: el.fSchool.value ? "school" : selectedCategory,
-      recurring: !!el.fRecurring.checked,
+      recurring: el.fRecurring.value === "yearly",
+      repeat: el.fRecurring.value || null,
+      repeatUntil: el.fRecurring.value ? el.fRepeatUntil.value || null : null,
       notes: el.fNotes.value.trim()
     };
     el.eventSaveBtn.disabled = true;

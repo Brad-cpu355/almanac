@@ -59,10 +59,10 @@ async function handleApi(request, env, url) {
     const newId = crypto.randomUUID();
     const createdAt = Date.now();
     await env.DB.prepare(
-      `INSERT INTO events (id, title, date, time, category, recurring, notes, created_at, end_date)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO events (id, title, date, time, category, recurring, notes, created_at, end_date, repeat_frequency, repeat_until)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
-      .bind(newId, ev.title, ev.date, ev.time, ev.category, ev.recurring ? 1 : 0, ev.notes, createdAt, ev.endDate)
+      .bind(newId, ev.title, ev.date, ev.time, ev.category, ev.recurring ? 1 : 0, ev.notes, createdAt, ev.endDate, ev.repeat, ev.repeatUntil)
       .run();
     return json({ id: newId, ...ev, createdAt }, 201);
   }
@@ -71,16 +71,21 @@ async function handleApi(request, env, url) {
     const body = await request.json();
 
     // Preserve duration when an older client omits endDate.
-    if (body && body.endDate === undefined) {
+    if (body && (body.endDate === undefined || body.repeat === undefined)) {
       const existing = await env.DB.prepare(
-        "SELECT date, end_date FROM events WHERE id = ?"
+        "SELECT date, end_date, recurring, repeat_frequency, repeat_until FROM events WHERE id = ?"
       ).bind(id).first();
 
       if (!existing) {
         return json({ error: "Event not found" }, 404);
       }
 
-      if (existing.end_date) {
+      if (body.repeat === undefined && existing.repeat_frequency &&
+          (existing.repeat_frequency !== "yearly" || body.recurring === true)) {
+        body.repeat = existing.repeat_frequency;
+        body.repeatUntil = existing.repeat_until;
+      }
+      if (body.endDate === undefined && existing.end_date) {
         const validated = normalize(body);
         const duration =
           Date.parse(existing.end_date + "T00:00:00Z") -
@@ -96,10 +101,10 @@ async function handleApi(request, env, url) {
 
     const ev = normalize(body);
     const result = await env.DB.prepare(
-      `UPDATE events SET title = ?, date = ?, time = ?, category = ?, recurring = ?, notes = ?, end_date = ?
+      `UPDATE events SET title = ?, date = ?, time = ?, category = ?, recurring = ?, notes = ?, end_date = ?, repeat_frequency = ?, repeat_until = ?
        WHERE id = ?`
     )
-      .bind(ev.title, ev.date, ev.time, ev.category, ev.recurring ? 1 : 0, ev.notes, ev.endDate, id)
+      .bind(ev.title, ev.date, ev.time, ev.category, ev.recurring ? 1 : 0, ev.notes, ev.endDate, ev.repeat, ev.repeatUntil, id)
       .run();
     if (result.meta.changes === 0) return json({ error: "Event not found" }, 404);
     // Keep the linked notice date consistent when a calendar event is edited.
@@ -872,8 +877,18 @@ function normalize(body) {
     if (body.endDate !== body.date) {
       endDate = body.endDate;
     }
-    if (endDate && body.recurring) {
-      throw new ValidationError("Multi-day events cannot repeat annually");
+  }
+  const repeat = body.repeat === undefined ? (body.recurring ? "yearly" : null) : body.repeat;
+  if (repeat !== null && !["weekly", "monthly", "yearly"].includes(repeat)) {
+    throw new ValidationError("Invalid repeat frequency");
+  }
+  if (repeat && endDate) throw new ValidationError("Repeats are available for single-day events");
+  const repeatUntil = body.repeatUntil || null;
+  if (repeatUntil) {
+    const parsed = new Date(repeatUntil + "T00:00:00Z");
+    if (!repeat || typeof repeatUntil !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(repeatUntil) ||
+        Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== repeatUntil || repeatUntil < body.date) {
+      throw new ValidationError("Repeat end must be a valid date on or after the start date");
     }
   }
   const category = CATEGORIES.has(body.category) ? body.category : "other";
@@ -884,7 +899,9 @@ function normalize(body) {
     endDate,
     time,
     category,
-    recurring: !!body.recurring,
+    recurring: repeat === "yearly",
+    repeat,
+    repeatUntil,
     notes: typeof body.notes === "string" ? body.notes.trim().slice(0, 500) : "",
   };
 }
@@ -898,6 +915,8 @@ function rowToEvent(row) {
     time: row.time,
     category: row.category,
     recurring: !!row.recurring,
+    repeat: row.repeat_frequency || (row.recurring ? "yearly" : null),
+    repeatUntil: row.repeat_until || null,
     notes: row.notes,
     createdAt: row.created_at,
   };
