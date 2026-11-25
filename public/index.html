@@ -402,12 +402,16 @@
 
   <style>.review-badge{display:inline-block;background:#b93232;color:white;border-radius:999px;padding:1px 6px;font-size:11px;font-weight:700;min-width:17px;text-align:center}.review-badge[hidden]{display:none}</style>
   <div class="filter-bar" id="mainFilters" aria-label="Filter calendar events">
-    <span class="filter-label">Show</span>
+    <span class="filter-label">Calendar</span>
     <button type="button" class="filter-btn active" data-filter="all" aria-pressed="true">All</button>
     <button type="button" class="filter-btn" data-filter="school" aria-pressed="false">School</button>
     <button type="button" class="filter-btn" data-filter="walter" aria-pressed="false">Walter</button>
     <button type="button" class="filter-btn" data-filter="ingalill" aria-pressed="false">Ingalill</button>
     <button type="button" class="filter-btn" data-filter="other" aria-pressed="false">Other events</button>
+  </div>
+
+  <div class="filter-bar" id="categoryFilters" role="group" aria-label="Event categories">
+    <span class="filter-label">Categories</span>
   </div>
 
   <main>
@@ -627,6 +631,7 @@
     return child ? ev.title.slice(SCHOOL_PREFIX[child].length) : ev.title;
   }
   function matchesFilter(ev){
+    if(UI.categories.length && !UI.categories.includes(eventCategory(ev))) return false;
     var child = schoolChild(ev);
     if(UI.filter === "school") return eventCategory(ev) === "school";
     return UI.filter === "all" || (UI.filter === "other" ? !child : child === UI.filter);
@@ -750,14 +755,14 @@
   async function safeJson(res){ try{ return await res.json(); }catch(e){ return {}; } }
 
   /* ---------------- UI prefs (per-device only) ---------------- */
-  var UI = { view:"agenda", filter:"all", year: new Date().getFullYear() };
+  var UI = { view:"agenda", filter:"all", categories:[], year: new Date().getFullYear() };
   (function loadUI(){
     try{
       var raw = localStorage.getItem("almanac-ui");
-      if(raw){ var p = JSON.parse(raw); if(p.view === "agenda" || p.view === "year" || p.view === "school" || p.view === "personal") UI.view = p.view; if(["all","school","walter","ingalill","other"].indexOf(p.filter) !== -1) UI.filter = p.filter; }
+      if(raw){ var p = JSON.parse(raw); if(p.view === "agenda" || p.view === "year" || p.view === "school" || p.view === "personal") UI.view = p.view; if(["all","school","walter","ingalill","other"].indexOf(p.filter) !== -1) UI.filter = p.filter; if(Array.isArray(p.categories)) UI.categories = CATEGORY_ORDER.filter(function(key){ return p.categories.includes(key); }); }
     }catch(e){}
   })();
-  function saveUI(){ try{ localStorage.setItem("almanac-ui", JSON.stringify({view:UI.view,filter:UI.filter})); }catch(e){} }
+  function saveUI(){ try{ localStorage.setItem("almanac-ui", JSON.stringify({view:UI.view,filter:UI.filter,categories:UI.categories})); }catch(e){} }
 
   /* ---------------- DOM refs ---------------- */
   var el = {
@@ -850,6 +855,7 @@
     el.viewSchool.classList.toggle("active", v==="school");
     el.viewPersonal.classList.toggle("active", v==="personal");
     el.mainFilters.hidden = v==="school" || v==="personal";
+    document.getElementById("categoryFilters").hidden = el.mainFilters.hidden;
     if(v==="school") renderSchoolTab();
     if(v==="year"){
       renderYear();
@@ -1404,6 +1410,33 @@
     }
     if(UI.view === "school") renderSchoolTab();
   }
+  var categoryFilters = document.getElementById("categoryFilters");
+  var categoryButtons = new Map();
+  [null].concat(CATEGORY_ORDER).forEach(function(key){
+    var button = document.createElement("button");
+    button.type = "button";
+    button.className = "filter-btn";
+    button.textContent = key ? catLabel(key) : "All categories";
+    button.addEventListener("click", function(){
+      if(key === null) UI.categories = [];
+      else if(UI.categories.includes(key)) UI.categories = UI.categories.filter(function(value){ return value !== key; });
+      else UI.categories.push(key);
+      updateCategoryButtons();
+      saveUI();
+      refreshCalendar();
+    });
+    categoryButtons.set(key, button);
+    categoryFilters.appendChild(button);
+  });
+  function updateCategoryButtons(){
+    categoryButtons.forEach(function(button,key){
+      var selected = key === null ? UI.categories.length === 0 : UI.categories.includes(key);
+      button.classList.toggle("active", selected);
+      button.setAttribute("aria-pressed", String(selected));
+    });
+  }
+  updateCategoryButtons();
+
   function setFilter(filter){
     UI.filter = filter; saveUI();
     el.filterButtons.forEach(function(btn){
@@ -1448,6 +1481,11 @@
     past.sort(function(a,b){ return b.occ.getTime() - a.occ.getTime(); });
 
     el.agendaContent.innerHTML = "";
+
+    if(!events.length && Store.events.length){
+      el.agendaContent.innerHTML = '<div class="empty-state"><p>No events match the selected filters.</p></div>';
+      return;
+    }
 
     if(upcoming.length === 0 && past.length === 0){
       el.agendaContent.innerHTML =
