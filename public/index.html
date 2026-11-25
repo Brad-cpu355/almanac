@@ -441,6 +441,7 @@
         <h2>☑ My tasks <span id="generalTaskCount">…</span></h2>
         <form id="generalTaskForm" style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0">
           <input id="generalTaskInput" type="text" maxlength="500" required placeholder="Add a task" aria-label="New task" style="flex:1;min-width:160px;padding:9px;border:1px solid var(--line);border-radius:8px">
+          <label>Due date (optional) <input id="generalTaskDue" type="date"></label>
           <button class="btn btn-primary" type="submit">+ Add task</button>
         </form>
         <div id="generalTaskList"><p class="hint">Loading tasks…</p></div>
@@ -615,6 +616,9 @@
         <textarea id="f-notes" maxlength="500" placeholder="Any details worth remembering"></textarea>
       </div>
       <div class="panel-actions">
+        <button type="button" class="btn btn-ghost" id="eventDuplicate" hidden>Duplicate event</button>
+        <button type="button" class="btn btn-ghost" id="eventEditOccurrence" hidden>Edit this occurrence</button>
+        <button type="button" class="btn btn-ghost" id="eventSkipOccurrence" hidden>Skip this occurrence</button>
         <button type="button" class="btn btn-danger" id="eventDelete" style="display:none;">Delete</button>
         <button type="submit" class="btn btn-primary" id="eventSaveBtn">Save event</button>
       </div>
@@ -691,6 +695,14 @@
   }
 
   function nextOccurrence(ev, ref){
+    var occurrence = scheduledOccurrence(ev, ref);
+    while(occurrence && ev.skippedDates?.includes(dateToStr(occurrence))){
+      occurrence = scheduledOccurrence(ev, new Date(occurrence.getFullYear(), occurrence.getMonth(), occurrence.getDate()+1));
+    }
+    return occurrence;
+  }
+
+  function scheduledOccurrence(ev, ref){
     var start = strToDate(ev.date);
     var mode = repeatMode(ev);
     if(!mode){
@@ -1081,18 +1093,21 @@
       var approve=document.createElement("button");approve.type="button";approve.className="btn btn-primary";approve.textContent="Add task / event";
       var dismiss=document.createElement("button");dismiss.type="button";dismiss.className="btn btn-ghost";dismiss.textContent="Dismiss";
       actions.appendChild(approve);actions.appendChild(dismiss);box.appendChild(actions);
-      async function review(decision){
+      async function review(decision,dueDate){
+          if(approve.disabled || dismiss.disabled) return;
         if(decision==="approve"&&!child.value){showToast("Choose Walter or Ingalill",true);return;}
         approve.disabled=true;dismiss.disabled=true;
         try{
           var response=await fetch("/api/school-email/review",{method:"POST",headers:{"content-type":"application/json"},
-            body:JSON.stringify({id:item.id,decision:decision,child:child.value,title:title.value,date:date.value,kind:kind.value})});
+            body:JSON.stringify({id:item.id,decision:decision,dueDate:dueDate,child:child.value,title:title.value,date:date.value,kind:kind.value})});
           if(!response.ok){var data=await response.json();throw new Error(data.error||"Could not review email");}
           await reloadEmailSuggestions();
           if(decision==="approve"){await loadSchoolNotices();await Store.init();}
-          showToast(decision==="approve"?"School entry approved":"Email dismissed");
+          if(decision==="task") await loadGeneralTasks();
+          showToast(decision==="task"?"Task created":decision==="approve"?"School entry approved":"Email dismissed");
         }catch(err){showToast(err.message,true);approve.disabled=false;dismiss.disabled=false;}
       }
+      addEmailTaskControls(box,title,review);
       approve.addEventListener("click",function(){review("approve");});
       dismiss.addEventListener("click",function(){review("dismiss");});
       gmailSuggestionsList.appendChild(box);
@@ -1116,6 +1131,29 @@
   var personalScan=document.getElementById("personalScan");
   var personalStatus=document.getElementById("personalScanStatus");
   var personalList=document.getElementById("personalSuggestions");
+  function addEmailTaskControls(box, title, review){
+    var controls = document.createElement("details");
+    var toggle = document.createElement("summary");
+    toggle.textContent = "Create task from email";
+    var label = document.createElement("label");
+    label.textContent = "Task due date (optional) ";
+    var date = document.createElement("input");
+    date.type = "date";
+    label.appendChild(date);
+    var button = document.createElement("button");
+    button.type = "button";
+    button.className = "btn btn-ghost";
+    button.textContent = "Create task";
+    button.addEventListener("click", async function(){
+      if(!title.value.trim()){showToast("Enter a title for the task",true);return;}
+      button.disabled = true;
+      try{await review("task",date.value || null);}
+      finally{button.disabled = false;}
+    });
+    controls.append(toggle,label,button);
+    box.appendChild(controls);
+  }
+
   async function reloadPersonalEmails(){
     try{
       var response=await fetch("/api/personal-email/suggestions",{cache:"no-store"});
@@ -1139,19 +1177,22 @@
         var approve=document.createElement("button");approve.type="button";approve.className="btn btn-primary";approve.textContent="Approve personal event";
         var dismiss=document.createElement("button");dismiss.type="button";dismiss.className="btn btn-ghost";dismiss.textContent="Dismiss";
         actions.appendChild(approve);actions.appendChild(dismiss);box.appendChild(actions);
-        async function review(decision){
+        async function review(decision,dueDate){
+          if(approve.disabled || dismiss.disabled) return;
           if(decision==="approve"&&!date.value){showToast("Confirm the appointment date",true);return;}
           approve.disabled=true;dismiss.disabled=true;
           try{
             var response=await fetch("/api/personal-email/review",{method:"POST",headers:{"content-type":"application/json"},
-              body:JSON.stringify({id:item.id,decision:decision,title:title.value,date:date.value,time:time.value})});
+              body:JSON.stringify({id:item.id,decision:decision,dueDate:dueDate,title:title.value,date:date.value,time:time.value})});
             var result=await response.json();
             if(!response.ok)throw new Error(result.error||"Could not review email");
             await reloadPersonalEmails();
             if(decision==="approve")await Store.init();
-            showToast(decision==="approve"?"Personal event added":"Email dismissed");
+            if(decision==="task") await loadGeneralTasks();
+            showToast(decision==="task"?"Task created":decision==="approve"?"Personal event added":"Email dismissed");
           }catch(err){showToast(err.message,true);approve.disabled=false;dismiss.disabled=false;}
         }
+        addEmailTaskControls(box,title,review);
         approve.addEventListener("click",function(){review("approve");});
         dismiss.addEventListener("click",function(){review("dismiss");});
         personalList.appendChild(box);
@@ -1506,7 +1547,7 @@
     else { el.syncLabel.textContent = "Connecting…"; }
   }
 
-  function collectWeekItems(today, events, notices){
+  function collectWeekItems(today, events, notices, tasks){
     var days = Array.from({length:7}, function(_, offset){
       return new Date(today.getFullYear(), today.getMonth(), today.getDate() + offset);
     });
@@ -1522,13 +1563,17 @@
         items.push({date:notice.dueDate, time:"", notice:notice});
       }
     });
+    tasks.forEach(function(task){
+      if(!task.done && task.dueDate && task.dueDate <= lastKey)
+        items.push({date:task.dueDate, time:"", task:task});
+    });
     items.sort(function(a,b){ return a.date.localeCompare(b.date) || a.time.localeCompare(b.time); });
     return {days:days, items:items};
   }
 
   function renderWeek(events){
     var today = todayDate();
-    var week = collectWeekItems(today, events, schoolNotices);
+    var week = collectWeekItems(today, events, schoolNotices, generalTasks || []);
     var shortDate = new Intl.DateTimeFormat(undefined, {day:"numeric", month:"short", year:"numeric"});
     var dayLabel = new Intl.DateTimeFormat(undefined, {weekday:"long", day:"numeric", month:"short"});
     document.getElementById("weekDates").textContent =
@@ -1544,17 +1589,18 @@
     if(!week.items.length && !noticeLoadError){
       var empty = document.createElement("p");
       empty.className = "hint";
-      empty.textContent = "No matching events or school actions due in the next seven days.";
+      empty.textContent = "No matching events or tasks due in the next seven days.";
       list.appendChild(empty);
     }
 
     var previous = "";
     week.items.forEach(function(item){
-      if(item.date !== previous){
+      var group = item.date < dateToStr(today) ? "overdue" : item.date;
+      if(group !== previous){
         var heading = document.createElement("h3");
-        heading.textContent = (item.date === dateToStr(today) ? "Today · " : "") + dayLabel.format(strToDate(item.date));
+        heading.textContent = group === "overdue" ? "Overdue" : (item.date === dateToStr(today) ? "Today · " : "") + dayLabel.format(strToDate(item.date));
         list.appendChild(heading);
-        previous = item.date;
+        previous = group;
       }
       var button = document.createElement("button");
       button.type = "button";
@@ -1570,7 +1616,11 @@
         var ongoing = range && item.event.date < dateToStr(today);
         context.textContent = [catLabel(eventCategory(item.event)), ongoing ? "In progress" : "",
           range, item.time && !ongoing ? formatTime(item.time) : ""].filter(Boolean).join(" · ");
-        button.addEventListener("click", function(){ openEventModal({mode:"edit", event:item.event}); });
+        button.addEventListener("click", function(){ openEventModal({mode:"edit", event:item.event, date:item.date}); });
+      }else if(item.task){
+        title.textContent = item.task.text;
+        context.textContent = "Task · Due " + dayLabel.format(strToDate(item.date));
+        button.addEventListener("click", function(){ focusGeneralTask(item.task); });
       }else{
         title.textContent = item.notice.title;
         context.textContent = "School action · " + (item.notice.child === "walter" ? "Walter" : "Ingalill");
@@ -1726,7 +1776,7 @@
       });
       row.querySelector(".event-main").appendChild(statusButton);
     }
-    row.addEventListener("click", function(){ openEventModal({mode:"edit", event:ev}); });
+    row.addEventListener("click", function(){ openEventModal({mode:"edit", event:ev, date:dateToStr(occ)}); });
     return row;
   }
 
@@ -1838,7 +1888,7 @@
       }
       row.innerHTML = '<span class="marker" aria-hidden="true"></span><span class="name">' +
         escapeHtml(displayTitle(item.event)) + '</span><span class="dates">' + escapeHtml(dates) + '</span>';
-      row.addEventListener("click", function(){ openEventModal({mode:"edit", event:item.event}); });
+      row.addEventListener("click", function(){ openEventModal({mode:"edit", event:item.event, date:dateToStr(item.start)}); });
       (index < 3 ? section : more).appendChild(row);
     });
     if(ordered.length > 3) section.appendChild(more);
@@ -1931,7 +1981,7 @@
           '<span class="dot" style="width:8px;height:8px;border-radius:50%;background:' + catColor(eventCategory(ev)) + ';flex:none;"></span>';
         item.addEventListener("click", function(){
           closeDayModal();
-          openEventModal({mode:"edit", event:ev});
+          openEventModal({mode:"edit", event:ev, date:dateStr});
         });
         el.dayEventsList.appendChild(item);
       });
@@ -1975,27 +2025,68 @@
     });
   }
 
+  var eventContext;
+  var duplicateEvent = document.getElementById("eventDuplicate");
+  var editOccurrence = document.getElementById("eventEditOccurrence");
+  var skipOccurrence = document.getElementById("eventSkipOccurrence");
+
+  async function saveOccurrence(event, date, replacement){
+    var response = await fetch("/api/events/" + encodeURIComponent(event.id) + "/occurrence", {
+      method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({date:date,event:replacement})
+    });
+    if(!response.ok) throw new Error((await safeJson(response)).error || "Could not change occurrence");
+    await Store.refresh();
+  }
+
+  duplicateEvent.addEventListener("click", function(){
+    openEventModal({mode:"duplicate",event:eventContext.event,date:eventContext.date});
+    el.fDate.focus();
+  });
+  editOccurrence.addEventListener("click", function(){
+    openEventModal({mode:"occurrence",event:eventContext.event,date:eventContext.date});
+  });
+  skipOccurrence.addEventListener("click", async function(){
+    var context = eventContext;
+    if(!confirm("Skip the occurrence on " + context.date + "?")) return;
+    skipOccurrence.disabled = true;
+    try{
+      await saveOccurrence(context.event,context.date,null);
+      if(eventContext === context) closeEventModal();
+      showToast("Occurrence skipped");
+    }catch(err){showToast(err.message,true);}
+    finally{skipOccurrence.disabled = false;}
+  });
+
   function openEventModal(opts){
+    eventContext = opts;
     editingId = null;
     el.errTitle.classList.remove("show");
     el.eventForm.reset();
     selectedCategory = "personal";
     selectedSchool = Object.prototype.hasOwnProperty.call(opts, "school") ? opts.school : (UI.view !== "school" && (UI.filter === "walter" || UI.filter === "ingalill") ? UI.filter : "");
 
-    if(opts.mode === "edit"){
+    var editingSeries = opts.mode === "edit";
+    var hasOccurrence = editingSeries && opts.date && repeatMode(opts.event) && occursOn(opts.event,strToDate(opts.date));
+    duplicateEvent.hidden = !editingSeries;
+    editOccurrence.hidden = skipOccurrence.hidden = !hasOccurrence;
+    if(opts.event){
       var ev = opts.event;
-      editingId = ev.id;
-      el.eventPanelTitle.textContent = "Edit event";
+      editingId = editingSeries ? ev.id : null;
+      el.eventPanelTitle.textContent = editingSeries ? "Edit event" : opts.mode === "duplicate" ? "Duplicate event" : "Edit this occurrence";
       el.fTitle.value = displayTitle(ev) || "";
       selectedSchool = schoolChild(ev);
-      el.fDate.value = ev.date || dateToStr(todayDate());
+      el.fDate.value = (editingSeries ? ev.date : opts.date || ev.date) || dateToStr(todayDate());
       el.fEndDate.value = ev.endDate || "";
+      if(opts.mode === "duplicate" && ev.endDate && el.fDate.value !== ev.date){
+        var duration = Date.parse(ev.endDate + "T00:00:00Z") - Date.parse(ev.date + "T00:00:00Z");
+        el.fEndDate.value = new Date(Date.parse(el.fDate.value + "T00:00:00Z") + duration).toISOString().slice(0,10);
+      }
       el.fTime.value = ev.time || "";
-      el.fRecurring.value = repeatMode(ev);
-      el.fRepeatUntil.value = ev.repeatUntil || "";
+      el.fRecurring.value = editingSeries ? repeatMode(ev) : "";
+      el.fRepeatUntil.value = editingSeries ? ev.repeatUntil || "" : "";
       el.fNotes.value = ev.notes || "";
       selectedCategory = eventCategory(ev);
-      el.eventDelete.style.display = "";
+      el.eventDelete.style.display = editingSeries ? "" : "none";
     } else {
       el.eventPanelTitle.textContent = "New event";
       el.fDate.value = opts.date || dateToStr(todayDate());
@@ -2005,6 +2096,7 @@
     el.fSchool.value = selectedSchool;
     buildCatPills();
     el.fEndDate.min = el.fDate.value;
+    el.fRecurring.disabled = opts.mode === "occurrence";
     updateRepeatFields();
     el.eventOverlay.hidden = false;
     setTimeout(function(){ el.fTitle.focus(); }, 30);
@@ -2032,6 +2124,11 @@
 
   el.fRecurring.addEventListener("change", updateRepeatFields);
   el.fDate.addEventListener("change", function(){
+    if(eventContext?.mode === "duplicate" && eventContext.event.endDate && el.fEndDate.value && el.fDate.value){
+      var duration = Date.parse(eventContext.event.endDate + "T00:00:00Z") -
+        Date.parse(eventContext.event.date + "T00:00:00Z");
+      el.fEndDate.value = new Date(Date.parse(el.fDate.value + "T00:00:00Z") + duration).toISOString().slice(0,10);
+    }
     el.fEndDate.min = el.fDate.value;
     updateRepeatFields();
   });
@@ -2069,7 +2166,8 @@
     };
     el.eventSaveBtn.disabled = true;
     try{
-      if(editingId){ await Store.update(editingId, data); await loadSchoolNotices(); }
+      if(eventContext.mode === "occurrence"){ await saveOccurrence(eventContext.event,eventContext.date,data); }
+      else if(editingId){ await Store.update(editingId, data); await loadSchoolNotices(); }
       else { await Store.add(data); }
       closeEventModal();
       showToast("Saved");
@@ -2109,7 +2207,7 @@
     return response.status===204?null:response.json();
   }
   async function loadGeneralTasks(){
-    try{generalTasks=await generalTaskRequest("");renderGeneralTasks();renderSearch();}
+    try{generalTasks=await generalTaskRequest("");renderGeneralTasks();renderSearch();renderWeek(filteredEvents(Store.events));}
     catch(err){document.getElementById("generalTaskCount").textContent="—";document.getElementById("generalTaskList").textContent="Unable to load tasks: "+err.message;}
   }
   function renderGeneralTasks(){
@@ -2117,8 +2215,11 @@
     list.replaceChildren();
     count.textContent=String(generalTasks.filter(function(t){return !t.done;}).length)+" open";
     if(!generalTasks.length){var empty=document.createElement("p");empty.className="hint";empty.textContent="No tasks yet.";list.appendChild(empty);return;}
-    generalTasks.forEach(function(task){
-      var row=document.createElement("div");row.style.cssText="display:flex;gap:9px;align-items:center;border-top:1px solid var(--line);padding:10px 0";
+    var today = dateToStr(todayDate());
+    generalTasks.slice().sort(function(a,b){
+      return Number(a.done) - Number(b.done) || (a.dueDate || "9999").localeCompare(b.dueDate || "9999");
+    }).forEach(function(task){
+      var row=document.createElement("div");row.style.cssText="display:flex;flex-wrap:wrap;gap:9px;align-items:center;border-top:1px solid var(--line);padding:10px 0";
       row.dataset.taskId=task.id;
       var toggle=document.createElement("input");toggle.type="checkbox";toggle.checked=task.done;toggle.setAttribute("aria-label","Complete "+task.text);
       var label=document.createElement("span");label.textContent=task.text;label.style.cssText="flex:1;overflow-wrap:anywhere"+(task.done?";text-decoration:line-through;opacity:.65":"");
@@ -2134,13 +2235,29 @@
         try{await generalTaskRequest("/"+encodeURIComponent(task.id),{method:"DELETE"});await loadGeneralTasks();}
         catch(err){showToast(err.message,true);del.disabled=false;}
       });
-      row.appendChild(toggle);row.appendChild(label);row.appendChild(del);list.appendChild(row);
+      var dueLabel = document.createElement("label");
+      dueLabel.textContent = !task.done && task.dueDate && task.dueDate < today ? "Overdue " : "Due ";
+      var due = document.createElement("input");
+      due.type = "date";
+      due.value = task.dueDate || "";
+      due.setAttribute("aria-label","Due date for " + task.text);
+      due.addEventListener("change", async function(){
+        due.disabled = true;
+        try{
+          await generalTaskRequest("/"+encodeURIComponent(task.id),{method:"PUT",headers:{"content-type":"application/json"},body:JSON.stringify({dueDate:due.value || null})});
+          await loadGeneralTasks();
+        }catch(err){due.value=task.dueDate || "";showToast(err.message,true);}
+        finally{due.disabled=false;}
+      });
+      dueLabel.appendChild(due);
+      row.append(toggle,label,dueLabel,del);
+      list.appendChild(row);
     });
   }
   document.getElementById("generalTaskForm").addEventListener("submit",async function(e){
     e.preventDefault();var input=document.getElementById("generalTaskInput"),value=input.value.trim();if(!value)return;
     var button=this.querySelector("button");button.disabled=true;
-    try{await generalTaskRequest("",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({text:value})});input.value="";await loadGeneralTasks();}
+    try{await generalTaskRequest("",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({text:value,dueDate:document.getElementById("generalTaskDue").value || null})});this.reset();await loadGeneralTasks();}
     catch(err){showToast(err.message,true);}finally{button.disabled=false;}
   });
   var searchInput = document.getElementById("almanacSearch");
@@ -2148,6 +2265,17 @@
   var searchList = document.getElementById("almanacSearchList");
   var searchStatus = document.getElementById("almanacSearchStatus");
   var clearSearch = document.getElementById("clearAlmanacSearch");
+
+  function focusGeneralTask(task){
+    setView("agenda");
+    var row = Array.from(document.getElementById("generalTaskList").children).find(function(item){
+      return item.dataset.taskId === String(task.id);
+    });
+    if(row){
+      row.scrollIntoView({block:"center"});
+      row.querySelector("input").focus({preventScroll:true});
+    }
+  }
 
   function searchWords(value){
     return value.toLowerCase().normalize("NFC").trim().split(/\s+/).filter(Boolean);
@@ -2184,16 +2312,10 @@
         notice.details, function(){ openNotice(notice); });
     });
     generalTasks.forEach(function(task){
-      add(task.text, task.done ? "Task · Completed" : "Task · Open", "", function(){
+      var context = task.done ? "Task · Completed" : "Task · Open";
+      add(task.text, context + (task.dueDate ? " · Due " + task.dueDate : ""), "", function(){
         clearSearch.click();
-        setView("agenda");
-        var row = Array.from(document.getElementById("generalTaskList").children).find(function(item){
-          return item.dataset.taskId === String(task.id);
-        });
-        if(row){
-          row.scrollIntoView({block:"center"});
-          row.querySelector("input").focus({preventScroll:true});
-        }
+        focusGeneralTask(task);
       });
     });
 

@@ -47,6 +47,8 @@ async function handleApi(request, env, url) {
   const id = segments[2];
   const { method } = request;
 
+  if (method === "POST" && id && segments[3] === "occurrence") return changeOccurrence(request, env.DB, id);
+
   if (method === "GET" && !id) {
     const { results } = await env.DB.prepare(
       "SELECT * FROM events ORDER BY date ASC"
@@ -130,21 +132,84 @@ async function handleApi(request, env, url) {
 
 
 
+function optionalDate(value){
+  if(value == null || value === "") return null;
+  if(typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value))
+    throw new ValidationError("Enter a valid date");
+  const date = new Date(value + "T00:00:00Z");
+  if(!Number.isFinite(+date) || date.toISOString().slice(0, 10) !== value)
+    throw new ValidationError("Enter a valid date");
+  return value;
+}
+
+function scheduledOccurrence(row, date){
+  if(!date || date < row.date || (row.repeat_until && date > row.repeat_until)) return false;
+  const start = new Date(row.date + "T00:00:00Z");
+  const target = new Date(date + "T00:00:00Z");
+  switch(row.repeat_frequency || (row.recurring ? "yearly" : "")){
+    case "weekly": return start.getUTCDay() === target.getUTCDay();
+    case "monthly": return start.getUTCDate() === target.getUTCDate();
+    case "yearly": return row.date.slice(5) === date.slice(5);
+    default: return false;
+  }
+}
+
+async function changeOccurrence(request, db, id){
+  const body = await request.json();
+  const date = optionalDate(body?.date);
+  const row = await db.prepare("SELECT * FROM events WHERE id=?").bind(id).first();
+  if(!row) return json({error:"Event not found"},404);
+  if(!scheduledOccurrence(row,date)) throw new ValidationError("Choose an occurrence of this series");
+  const alreadySkipped = JSON.parse(row.skipped_dates || "[]").includes(date);
+  if(alreadySkipped) return json({error:"This occurrence was already changed"},409);
+  const eligible = "id=? AND date=? AND recurring=? AND repeat_frequency IS ? AND repeat_until IS ? AND NOT EXISTS (SELECT 1 FROM json_each(skipped_dates) WHERE value=?)";
+  const expected = [id,row.date,row.recurring,row.repeat_frequency,row.repeat_until,date];
+  const statements = [];
+  if(body.event != null){
+    const ev = normalize({...body.event, recurring:false, repeat:null, repeatUntil:null});
+    statements.push(db.prepare(`INSERT INTO events (id,title,date,time,category,notes,created_at,end_date)
+      SELECT ?,?,?,?,?,?,?,? FROM events WHERE ${eligible}`)
+      .bind(crypto.randomUUID(),ev.title,ev.date,ev.time,ev.category,ev.notes,Date.now(),ev.endDate,...expected));
+  }
+  statements.push(db.prepare(`UPDATE events SET skipped_dates=json_insert(skipped_dates,'$[#]',?) WHERE ${eligible}`)
+    .bind(date,...expected));
+  const results = await db.batch(statements);
+  return results.at(-1).meta.changes ? json({status:"saved"}) : json({error:"The series changed. Refresh and try again."},409);
+}
+
+async function emailToTask(db, table, body){
+  const text = typeof body.title === "string" ? body.title.trim() : "";
+  if(!text || text.length > 500) throw new ValidationError("Enter a task title of 1–500 characters");
+  const dueDate = optionalDate(body.dueDate);
+  const results = await db.batch([
+    db.prepare(`INSERT INTO tasks (id,text,created_at,due_date,done,completed_at)
+      SELECT ?,?,?,?,0,NULL FROM ${table} WHERE message_id=? AND review_status='pending'`)
+      .bind(crypto.randomUUID(),text,Date.now(),dueDate,body.id),
+    db.prepare(`UPDATE ${table} SET review_status='approved' WHERE message_id=? AND review_status='pending'`).bind(body.id)
+  ]);
+  return results[0].meta.changes ? json({status:"task created"},201) : json({error:"Already reviewed"},409);
+}
+
 async function handleTasks(request, env, id) {
   if (request.method === "GET" && !id) {
     const {results}=await env.DB.prepare("SELECT * FROM tasks ORDER BY done ASC, created_at DESC").all();
-    return json(results.map(r=>({id:r.id,text:r.text,done:!!r.done,createdAt:r.created_at,completedAt:r.completed_at})));
+    return json(results.map(r=>({id:r.id,text:r.text,done:!!r.done,createdAt:r.created_at,completedAt:r.completed_at,dueDate:r.due_date || null})));
   }
   if (request.method === "POST" && !id) {
     const body=await request.json().catch(()=>({}));
     const value=typeof body.text==="string"?body.text.trim():"";
     if (!value || value.length>500) throw new ValidationError("Task must contain 1–500 characters");
     const taskId=crypto.randomUUID(), now=Date.now();
-    await env.DB.prepare("INSERT INTO tasks (id,text,done,created_at,completed_at) VALUES (?,?,0,?,NULL)").bind(taskId,value,now).run();
-    return json({id:taskId,text:value,done:false,createdAt:now,completedAt:null},201);
+    await env.DB.prepare("INSERT INTO tasks (id,text,done,created_at,completed_at,due_date) VALUES (?,?,0,?,NULL,?)").bind(taskId,value,now,optionalDate(body.dueDate)).run();
+    return json({id:taskId,text:value,done:false,createdAt:now,completedAt:null,dueDate:optionalDate(body.dueDate)},201);
   }
   if (request.method === "PUT" && id) {
     const body=await request.json().catch(()=>({}));
+    if(Object.prototype.hasOwnProperty.call(body,"dueDate")){
+      const dueDate = optionalDate(body.dueDate);
+      const updated = await env.DB.prepare("UPDATE tasks SET due_date=? WHERE id=?").bind(dueDate,id).run();
+      return updated.meta.changes ? json({id,dueDate}) : json({error:"Task not found"},404);
+    }
     if (typeof body.done!=="boolean") throw new ValidationError("done must be boolean");
     const result=await env.DB.prepare("UPDATE tasks SET done=?,completed_at=? WHERE id=?").bind(body.done?1:0,body.done?Date.now():null,id).run();
     return result.meta.changes?json({id,done:body.done}):json({error:"Task not found"},404);
@@ -589,6 +654,7 @@ async function handleSchoolEmail(request,env,url,action) {
     if(!row) return json({error:"Suggestion not found"},404);
     if(row.sender.toLowerCase().includes("maria.rosenqvist@malmo.se"))return json({error:"Use Personal Email Inbox for this sender"},403);
     if(row.review_status!=="pending")return json({error:"Already reviewed"},409);
+    if(body.decision==="task") return emailToTask(env.DB,"school_email_suggestions",body);
     if(body.decision==="dismiss"){
       await env.DB.prepare("UPDATE school_email_suggestions SET review_status='dismissed' WHERE message_id=? AND review_status='pending'").bind(body.id).run();
       return json({status:"dismissed"});
@@ -720,6 +786,7 @@ async function handlePersonalEmail(request,env,url,action){
     const row=await env.DB.prepare("SELECT review_status FROM personal_email_suggestions WHERE message_id=?").bind(body.id).first();
     if(!row)return json({error:"Suggestion not found"},404);
     if(row.review_status!=="pending")return json({error:"Already reviewed"},409);
+    if(body.decision==="task") return emailToTask(env.DB,"personal_email_suggestions",body);
     if(body.decision==="dismiss"){
       await env.DB.prepare("UPDATE personal_email_suggestions SET review_status='dismissed' WHERE message_id=? AND review_status='pending'").bind(body.id).run();
       return json({status:"dismissed"});
@@ -917,6 +984,7 @@ function rowToEvent(row) {
     recurring: !!row.recurring,
     repeat: row.repeat_frequency || (row.recurring ? "yearly" : null),
     repeatUntil: row.repeat_until || null,
+    skippedDates: JSON.parse(row.skipped_dates || "[]"),
     notes: row.notes,
     createdAt: row.created_at,
   };
