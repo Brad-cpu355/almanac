@@ -415,6 +415,17 @@
   </div>
 
   <main>
+    <section class="school-card" aria-label="Search Almanac">
+      <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+        <input id="almanacSearch" type="search" aria-label="Search events, school notices and tasks"
+          placeholder="Search events, notices and tasks" style="flex:1;min-width:0;padding:9px;border:1px solid var(--line);border-radius:8px">
+        <button id="clearAlmanacSearch" type="button" class="btn btn-ghost" hidden>Clear</button>
+      </div>
+      <div id="almanacSearchResults" hidden>
+        <p id="almanacSearchStatus" class="hint" role="status"></p>
+        <div id="almanacSearchList"></div>
+      </div>
+    </section>
     <section class="view active" id="view-agenda">
       <section class="school-card" id="emailReviewSummary" aria-label="Emails awaiting review">
         <h2>📬 Emails to review <span id="reviewTotal">…</span></h2>
@@ -1402,6 +1413,7 @@
     }
   }
   function refreshCalendar(){
+    renderSearch();
     renderAgenda(filteredEvents(Store.events));
     if(UI.view === "year"){
       var previousScroll = window.scrollY;
@@ -1966,7 +1978,7 @@
     return response.status===204?null:response.json();
   }
   async function loadGeneralTasks(){
-    try{generalTasks=await generalTaskRequest("");renderGeneralTasks();}
+    try{generalTasks=await generalTaskRequest("");renderGeneralTasks();renderSearch();}
     catch(err){document.getElementById("generalTaskCount").textContent="—";document.getElementById("generalTaskList").textContent="Unable to load tasks: "+err.message;}
   }
   function renderGeneralTasks(){
@@ -1976,6 +1988,7 @@
     if(!generalTasks.length){var empty=document.createElement("p");empty.className="hint";empty.textContent="No tasks yet.";list.appendChild(empty);return;}
     generalTasks.forEach(function(task){
       var row=document.createElement("div");row.style.cssText="display:flex;gap:9px;align-items:center;border-top:1px solid var(--line);padding:10px 0";
+      row.dataset.taskId=task.id;
       var toggle=document.createElement("input");toggle.type="checkbox";toggle.checked=task.done;toggle.setAttribute("aria-label","Complete "+task.text);
       var label=document.createElement("span");label.textContent=task.text;label.style.cssText="flex:1;overflow-wrap:anywhere"+(task.done?";text-decoration:line-through;opacity:.65":"");
       var del=document.createElement("button");del.type="button";del.className="btn btn-ghost";del.textContent="Delete";del.setAttribute("aria-label","Delete "+task.text);
@@ -1998,6 +2011,85 @@
     var button=this.querySelector("button");button.disabled=true;
     try{await generalTaskRequest("",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({text:value})});input.value="";await loadGeneralTasks();}
     catch(err){showToast(err.message,true);}finally{button.disabled=false;}
+  });
+  var searchInput = document.getElementById("almanacSearch");
+  var searchResults = document.getElementById("almanacSearchResults");
+  var searchList = document.getElementById("almanacSearchList");
+  var searchStatus = document.getElementById("almanacSearchStatus");
+  var clearSearch = document.getElementById("clearAlmanacSearch");
+
+  function searchWords(value){
+    return value.toLowerCase().normalize("NFC").trim().split(/\s+/).filter(Boolean);
+  }
+
+  function renderSearch(){
+    var terms = searchWords(searchInput.value);
+    searchResults.hidden = terms.length === 0;
+    clearSearch.hidden = !searchInput.value;
+    searchList.replaceChildren();
+    if(!terms.length){
+      searchStatus.textContent = "";
+      return;
+    }
+
+    var results = [];
+    function add(title, context, keywords, open){
+      var haystack = [title, context, keywords].join(" ").toLowerCase().normalize("NFC");
+      if(terms.every(function(term){ return haystack.includes(term); })){
+        results.push({title:title, context:context, open:open});
+      }
+    }
+
+    Store.events.slice().sort(function(a,b){ return b.date.localeCompare(a.date); }).forEach(function(event){
+      var dates = eventRangeLabel(event) || event.date;
+      add(displayTitle(event), "Event · " + dates + " · " + catLabel(eventCategory(event)),
+        [event.title, event.notes, event.date, event.endDate].join(" "), function(){
+          openEventModal({mode:"edit", event:event});
+        });
+    });
+    schoolNotices.forEach(function(notice){
+      var child = notice.child === "walter" ? "Walter" : "Ingalill";
+      add(notice.title, "School notice · " + child + (notice.dueDate ? " · " + notice.dueDate : ""),
+        notice.details, function(){ openNotice(notice); });
+    });
+    generalTasks.forEach(function(task){
+      add(task.text, task.done ? "Task · Completed" : "Task · Open", "", function(){
+        clearSearch.click();
+        setView("agenda");
+        var row = Array.from(document.getElementById("generalTaskList").children).find(function(item){
+          return item.dataset.taskId === String(task.id);
+        });
+        if(row){
+          row.scrollIntoView({block:"center"});
+          row.querySelector("input").focus({preventScroll:true});
+        }
+      });
+    });
+
+    searchStatus.textContent = results.length === 0 ? "No matches." :
+      results.length + (results.length === 1 ? " match" : " matches");
+    results.forEach(function(result){
+      var row = document.createElement("button");
+      row.type = "button";
+      row.className = "month-event";
+      row.style.gridTemplateColumns = "minmax(0, 1fr)";
+      var title = document.createElement("span");
+      title.className = "name";
+      title.textContent = result.title;
+      var context = document.createElement("small");
+      context.style.gridColumn = "1";
+      context.textContent = result.context;
+      row.append(title, context);
+      row.addEventListener("click", result.open);
+      searchList.appendChild(row);
+    });
+  }
+
+  searchInput.addEventListener("input", renderSearch);
+  clearSearch.addEventListener("click", function(){
+    searchInput.value = "";
+    renderSearch();
+    searchInput.focus();
   });
   loadGeneralTasks();
 
