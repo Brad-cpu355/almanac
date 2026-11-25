@@ -161,7 +161,7 @@
   .task-count{color:var(--ink-soft);font-size:.85rem;white-space:nowrap}
   .task-add-form,.task-edit-form{display:grid;gap:10px}
   .task-add-form{margin-bottom:14px}
-  .task-add-controls,.task-row-meta{display:flex;align-items:flex-end;justify-content:space-between;flex-wrap:wrap;gap:8px 12px}
+  .task-add-controls{display:flex;align-items:flex-end;justify-content:space-between;flex-wrap:wrap;gap:8px 12px}
   .task-date-label{display:grid;gap:4px;min-width:0;color:var(--ink-soft);font-size:.8rem}
   .task-date-label.overdue{color:var(--danger);font-weight:600}
   .task-input,.task-date{
@@ -177,9 +177,18 @@
   .task-toggle input{width:18px;height:18px;margin:0;accent-color:var(--accent)}
   .task-title{font-weight:600;line-height:1.4;overflow-wrap:anywhere}
   .task-title.completed{text-decoration:line-through;color:var(--ink-soft)}
-  .task-row-meta,.task-edit-form{grid-column:2}
+  .task-row-meta{
+    grid-column:1 / -1;display:grid;grid-template-columns:minmax(0,1fr) auto;
+    align-items:end;gap:8px;padding-left:32px;
+  }
+  .task-row-meta .task-date{width:100%;max-width:9.75rem;padding-inline:6px}
+  .task-row-meta .task-actions{flex-wrap:nowrap}
+  .task-edit-form{grid-column:2}
+  @media (max-width:360px){.task-row-meta{padding-left:0}}
+
   .task-actions{display:flex;gap:6px;flex-wrap:wrap}
   #generalTasks .task-actions .btn{padding:7px 10px;min-height:44px}
+  #generalTasks .task-row-meta .btn{margin-top:0;padding-inline:8px;white-space:nowrap}
   #generalTasks .task-add-controls .btn{min-height:44px}
   #generalTasks .task-edit-form[hidden]{display:none}
   .filter-bar{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin:0 0 16px;}
