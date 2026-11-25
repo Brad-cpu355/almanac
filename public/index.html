@@ -427,6 +427,11 @@
       </div>
     </section>
     <section class="view active" id="view-agenda">
+      <section class="school-card" aria-labelledby="weekHeading">
+        <h2 id="weekHeading">This week</h2>
+        <p class="hint" id="weekDates"></p>
+        <div id="weekItems"></div>
+      </section>
       <section class="school-card" id="emailReviewSummary" aria-label="Emails awaiting review">
         <h2>📬 Emails to review <span id="reviewTotal">…</span></h2>
         <p><button type="button" class="btn btn-ghost" id="reviewSchoolJump">School: <strong id="reviewSchoolCount">…</strong> →</button> <button type="button" class="btn btn-ghost" id="reviewPersonalJump">Personal: <strong id="reviewPersonalCount">…</strong> →</button></p>
@@ -1414,7 +1419,9 @@
   }
   function refreshCalendar(){
     renderSearch();
-    renderAgenda(filteredEvents(Store.events));
+    var events = filteredEvents(Store.events);
+    renderAgenda(events);
+    renderWeek(events);
     if(UI.view === "year"){
       var previousScroll = window.scrollY;
       renderYear();
@@ -1471,6 +1478,81 @@
     if(mode === "sync"){ el.syncDot.classList.add("on"); el.syncLabel.textContent = "Synced"; }
     else if(mode === "offline"){ el.syncDot.classList.add("off"); el.syncLabel.textContent = "Offline — showing last synced copy"; }
     else { el.syncLabel.textContent = "Connecting…"; }
+  }
+
+  function collectWeekItems(today, events, notices){
+    var days = Array.from({length:7}, function(_, offset){
+      return new Date(today.getFullYear(), today.getMonth(), today.getDate() + offset);
+    });
+    var firstKey = dateToStr(days[0]);
+    var lastKey = dateToStr(days[6]);
+    var items = [];
+    events.forEach(function(event){
+      var day = days.find(function(date){ return occursOn(event, date); });
+      if(day) items.push({date:dateToStr(day), time:event.time || "", event:event});
+    });
+    notices.forEach(function(notice){
+      if(notice.status === "action" && notice.dueDate && notice.dueDate >= firstKey && notice.dueDate <= lastKey){
+        items.push({date:notice.dueDate, time:"", notice:notice});
+      }
+    });
+    items.sort(function(a,b){ return a.date.localeCompare(b.date) || a.time.localeCompare(b.time); });
+    return {days:days, items:items};
+  }
+
+  function renderWeek(events){
+    var today = todayDate();
+    var week = collectWeekItems(today, events, schoolNotices);
+    var shortDate = new Intl.DateTimeFormat(undefined, {day:"numeric", month:"short", year:"numeric"});
+    var dayLabel = new Intl.DateTimeFormat(undefined, {weekday:"long", day:"numeric", month:"short"});
+    document.getElementById("weekDates").textContent =
+      shortDate.format(week.days[0]) + " – " + shortDate.format(week.days[6]);
+    var list = document.getElementById("weekItems");
+    list.replaceChildren();
+    if(noticeLoadError){
+      var warning = document.createElement("p");
+      warning.className = "hint";
+      warning.textContent = noticeLoadError;
+      list.appendChild(warning);
+    }
+    if(!week.items.length && !noticeLoadError){
+      var empty = document.createElement("p");
+      empty.className = "hint";
+      empty.textContent = "No matching events or school actions due in the next seven days.";
+      list.appendChild(empty);
+    }
+
+    var previous = "";
+    week.items.forEach(function(item){
+      if(item.date !== previous){
+        var heading = document.createElement("h3");
+        heading.textContent = (item.date === dateToStr(today) ? "Today · " : "") + dayLabel.format(strToDate(item.date));
+        list.appendChild(heading);
+        previous = item.date;
+      }
+      var button = document.createElement("button");
+      button.type = "button";
+      button.className = "month-event";
+      button.style.gridTemplateColumns = "minmax(0, 1fr)";
+      var title = document.createElement("span");
+      title.className = "name";
+      var context = document.createElement("small");
+      context.style.gridColumn = "1";
+      if(item.event){
+        title.textContent = displayTitle(item.event);
+        var range = eventRangeLabel(item.event);
+        var ongoing = range && item.event.date < dateToStr(today);
+        context.textContent = [catLabel(eventCategory(item.event)), ongoing ? "In progress" : "",
+          range, item.time && !ongoing ? formatTime(item.time) : ""].filter(Boolean).join(" · ");
+        button.addEventListener("click", function(){ openEventModal({mode:"edit", event:item.event}); });
+      }else{
+        title.textContent = item.notice.title;
+        context.textContent = "School action · " + (item.notice.child === "walter" ? "Walter" : "Ingalill");
+        button.addEventListener("click", function(){ openNotice(item.notice); });
+      }
+      button.append(title, context);
+      list.appendChild(button);
+    });
   }
 
   /* ---------------- Agenda ---------------- */
