@@ -156,6 +156,32 @@
   #agendaTasks[hidden], #emailReviewSummary[hidden]{display:none !important;}
 
   /* ---------- School & event filters ---------- */
+  .task-header{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:12px}
+  #generalTasks .task-header h2{margin:0}
+  .task-count{color:var(--ink-soft);font-size:.85rem;white-space:nowrap}
+  .task-add-form,.task-edit-form{display:grid;gap:10px}
+  .task-add-form{margin-bottom:14px}
+  .task-add-controls,.task-row-meta{display:flex;align-items:flex-end;justify-content:space-between;flex-wrap:wrap;gap:8px 12px}
+  .task-date-label{display:grid;gap:4px;min-width:0;color:var(--ink-soft);font-size:.8rem}
+  .task-date-label.overdue{color:var(--danger);font-weight:600}
+  .task-input,.task-date{
+    display:block;box-sizing:border-box;min-width:0;max-width:100%;min-height:44px;
+    padding:8px 10px;border:1px solid var(--line);border-radius:var(--radius-sm);
+    background:var(--surface-2);color:var(--ink);font:inherit;font-size:1rem;
+  }
+  .task-input{width:100%}
+  .task-date{width:9.75rem}
+  .task-date::-webkit-date-and-time-value{text-align:left}
+  .task-row{display:grid;grid-template-columns:24px minmax(0,1fr);gap:4px 8px;padding:12px 0;border-top:1px solid var(--line)}
+  .task-toggle{display:grid;place-items:center;align-self:start;min-height:28px}
+  .task-toggle input{width:18px;height:18px;margin:0;accent-color:var(--accent)}
+  .task-title{font-weight:600;line-height:1.4;overflow-wrap:anywhere}
+  .task-title.completed{text-decoration:line-through;color:var(--ink-soft)}
+  .task-row-meta,.task-edit-form{grid-column:2}
+  .task-actions{display:flex;gap:6px;flex-wrap:wrap}
+  #generalTasks .task-actions .btn{padding:7px 10px;min-height:44px}
+  #generalTasks .task-add-controls .btn{min-height:44px}
+  #generalTasks .task-edit-form[hidden]{display:none}
   .filter-bar{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin:0 0 16px;}
   .filter-label{font-size:.72rem;color:var(--ink-faint);font-weight:600;margin-right:3px;}
   .filter-btn{border:1px solid var(--line);background:var(--surface);color:var(--ink-soft);border-radius:999px;padding:7px 12px;font-size:.78rem;font-weight:600;cursor:pointer;}
@@ -438,11 +464,16 @@
         <p class="hint" id="reviewScanHint">Counts reflect emails already scanned, not your live Gmail inbox.</p>
       </section>
       <section class="school-card" id="generalTasks" aria-label="General tasks">
-        <h2>☑ My tasks <span id="generalTaskCount">…</span></h2>
-        <form id="generalTaskForm" style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0">
-          <input id="generalTaskInput" type="text" maxlength="500" required placeholder="Add a task" aria-label="New task" style="flex:1;min-width:160px;padding:9px;border:1px solid var(--line);border-radius:8px">
-          <label>Due date (optional) <input id="generalTaskDue" type="date"></label>
-          <button class="btn btn-primary" type="submit">+ Add task</button>
+        <div class="task-header">
+          <h2>My tasks</h2>
+          <span class="task-count" id="generalTaskCount">…</span>
+        </div>
+        <form id="generalTaskForm" class="task-add-form">
+          <input id="generalTaskInput" class="task-input" type="text" maxlength="500" required placeholder="Add a task" aria-label="New task">
+          <div class="task-add-controls">
+            <label class="task-date-label">Due date (optional) <input id="generalTaskDue" class="task-date" type="date"></label>
+            <button class="btn btn-primary" type="submit">+ Add task</button>
+          </div>
         </form>
         <div id="generalTaskList"><p class="hint">Loading tasks…</p></div>
       </section>
@@ -2219,10 +2250,10 @@
     generalTasks.slice().sort(function(a,b){
       return Number(a.done) - Number(b.done) || (a.dueDate || "9999").localeCompare(b.dueDate || "9999");
     }).forEach(function(task){
-      var row=document.createElement("div");row.style.cssText="display:flex;flex-wrap:wrap;gap:9px;align-items:center;border-top:1px solid var(--line);padding:10px 0";
+      var row=document.createElement("div");row.className="task-row";
       row.dataset.taskId=task.id;
       var toggle=document.createElement("input");toggle.type="checkbox";toggle.checked=task.done;toggle.setAttribute("aria-label","Complete "+task.text);
-      var label=document.createElement("span");label.textContent=task.text;label.style.cssText="flex:1;overflow-wrap:anywhere"+(task.done?";text-decoration:line-through;opacity:.65":"");
+      var label=document.createElement("span");label.textContent=task.text;label.className="task-title"+(task.done?" completed":"");
       var del=document.createElement("button");del.type="button";del.className="btn btn-ghost";del.textContent="Delete";del.setAttribute("aria-label","Delete "+task.text);
       toggle.addEventListener("change",async function(){
         toggle.disabled=true;
@@ -2236,9 +2267,12 @@
         catch(err){showToast(err.message,true);del.disabled=false;}
       });
       var dueLabel = document.createElement("label");
-      dueLabel.textContent = !task.done && task.dueDate && task.dueDate < today ? "Overdue " : "Due ";
+      var overdue = !task.done && task.dueDate && task.dueDate < today;
+      dueLabel.className = "task-date-label" + (overdue ? " overdue" : "");
+      dueLabel.textContent = overdue ? "Overdue" : "Due date";
       var due = document.createElement("input");
       due.type = "date";
+      due.className = "task-date";
       due.value = task.dueDate || "";
       due.setAttribute("aria-label","Due date for " + task.text);
       due.addEventListener("change", async function(){
@@ -2257,13 +2291,13 @@
       edit.setAttribute("aria-label", "Edit task: " + task.text);
       var form = document.createElement("form");
       form.hidden = true;
-      form.style.cssText = "flex-basis:100%;display:flex;flex-wrap:wrap;gap:8px";
+      form.className = "task-edit-form";
       var input = document.createElement("input");
       input.type = "text";
       input.required = true;
       input.maxLength = 500;
       input.setAttribute("aria-label", "Task title");
-      input.style.cssText = "flex:1;min-width:120px";
+      input.className = "task-input";
       var save = document.createElement("button");
       save.type = "submit";
       save.className = "btn btn-primary";
@@ -2298,8 +2332,20 @@
         }catch(err){ showToast(err.message,true); }
         finally{ save.disabled = cancel.disabled = false; }
       });
-      form.append(input,save,cancel);
-      row.append(toggle,label,dueLabel,edit,del,form);
+      var toggleLabel = document.createElement("label");
+      toggleLabel.className = "task-toggle";
+      toggleLabel.appendChild(toggle);
+      var editActions = document.createElement("div");
+      editActions.className = "task-actions";
+      editActions.append(save,cancel);
+      form.append(input,editActions);
+      var actions = document.createElement("div");
+      actions.className = "task-actions";
+      actions.append(edit,del);
+      var meta = document.createElement("div");
+      meta.className = "task-row-meta";
+      meta.append(dueLabel,actions);
+      row.append(toggleLabel,label,meta,form);
       list.appendChild(row);
     });
   }
