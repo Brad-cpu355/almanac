@@ -471,11 +471,12 @@ function gmailBodyText(message) {
     }catch{return "";}
   }).join("\n").slice(0,12000);
 }
+const PRORENATA_SCHOOL_SENDER = "noreply+malmo-stad@prorenata.se";
 function verifiedSchoolSender(header) {
   const match=String(header||"").match(/<([^<>]+)>/) || String(header||"").match(/([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})/i);
   const address=(match?.[1]||"").toLowerCase();
   const domain=address.split("@")[1]||"";
-  return domain==="unikum.net"||domain.endsWith(".unikum.net")||domain==="malmo.se"||domain.endsWith(".malmo.se");
+  return address.trim()===PRORENATA_SCHOOL_SENDER||domain==="unikum.net"||domain.endsWith(".unikum.net")||domain==="malmo.se"||domain.endsWith(".malmo.se");
 }
 function schoolEmailRow(row) {
   return {id:row.message_id,subject:row.subject,sender:row.sender,snippet:row.snippet,
@@ -494,7 +495,7 @@ async function handleSchoolEmail(request,env,url,action) {
   if(action==="scan" && request.method==="POST"){
     const token=await gmailAccessToken(env);
     // Explicitly limit the query to school-service senders, not the full inbox.
-    const query='newer_than:30d {from:(unikum.net) from:(malmo.se) from:(malmö.se)} -from:maria.rosenqvist@malmo.se';
+    const query=`newer_than:30d {from:(unikum.net) from:(malmo.se) from:(malmö.se) from:"${PRORENATA_SCHOOL_SENDER}"} -from:maria.rosenqvist@malmo.se`;
     const list=await gmailRequest(token,"messages?"+new URLSearchParams({q:query,maxResults:"40"}));
     let added=0,skipped=0;
     for(const item of list.messages||[]){
