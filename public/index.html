@@ -81,6 +81,30 @@
   .sync-dot.off{ background:var(--danger); }
 
   .topbar-actions{ display:flex; align-items:center; gap:10px; }
+  .quick-add{position:relative}
+  #addBtn{justify-content:center;min-height:44px}
+  .quick-add-options{
+    position:absolute;right:0;top:calc(100% + 6px);z-index:5;display:grid;gap:6px;
+    min-width:150px;padding:8px;border:1px solid var(--line);border-radius:var(--radius-sm);
+    background:var(--surface);box-shadow:var(--shadow);
+  }
+  .quick-add-options .btn{justify-content:center;min-height:44px}
+  @media (max-width:600px){
+    .topbar-actions{width:100%;flex-direction:column;align-items:stretch}
+    .topbar-actions .segmented{display:grid;grid-template-columns:repeat(4,minmax(0,1fr))}
+    .topbar-actions .segmented button{padding-inline:4px}
+    .quick-add{width:min(100%, 20rem);align-self:center}
+    #addBtn{width:100%}
+    .quick-add-options{position:static;grid-template-columns:1fr 1fr;margin-top:6px;min-width:0}
+    #mainFilters,#categoryFilters{display:grid;gap:5px}
+    #mainFilters{grid-template-columns:minmax(0,.62fr) minmax(0,.91fr) minmax(0,.96fr) minmax(0,1.04fr) minmax(0,1.47fr)}
+    #categoryFilters{grid-template-columns:repeat(4,minmax(0,1fr))}
+    #mainFilters .filter-label,#categoryFilters .filter-label{grid-column:1 / -1;margin:0 0 2px}
+    #mainFilters .filter-btn,#categoryFilters .filter-btn{
+      min-width:0;min-height:40px;padding:5px 2px;font-size:.72rem;line-height:1.15;
+    }
+    #mainFilters .filter-btn{white-space:nowrap}
+  }
 
   .segmented{ display:inline-flex; background:var(--surface-2); border:1px solid var(--line); border-radius:999px; padding:3px; gap:2px; }
   .segmented button{
@@ -403,7 +427,13 @@
         <button type="button" data-view="school">School <span id="schoolTabBadge" class="review-badge" hidden></span></button>
         <button type="button" data-view="personal">Personal <span id="personalTabBadge" class="review-badge" hidden></span></button>
       </div>
-      <button type="button" class="btn btn-primary" id="addBtn">+ Add</button>
+      <div class="quick-add">
+        <button type="button" class="btn btn-primary" id="addBtn" aria-expanded="false" aria-controls="quickAddOptions">+ Add event/Task</button>
+        <div class="quick-add-options" id="quickAddOptions" hidden>
+          <button type="button" class="btn btn-ghost" id="quickAddEvent">Add event</button>
+          <button type="button" class="btn btn-ghost" id="quickAddTask">Add task</button>
+        </div>
+      </div>
     </div>
   </header>
 
@@ -2179,7 +2209,32 @@
   el.eventClose.addEventListener("click", closeEventModal);
   el.eventOverlay.addEventListener("click", function(e){ if(e.target === el.eventOverlay) closeEventModal(); });
 
-  el.addBtn.addEventListener("click", function(){ openEventModal({mode:"add"}); });
+  var quickAddOptions = document.getElementById("quickAddOptions");
+  function setQuickAdd(open){
+    quickAddOptions.hidden = !open;
+    el.addBtn.setAttribute("aria-expanded", String(open));
+  }
+  el.addBtn.addEventListener("click", function(){ setQuickAdd(quickAddOptions.hidden); });
+  document.getElementById("quickAddEvent").addEventListener("click", function(){
+    setQuickAdd(false);
+    openEventModal({mode:"add"});
+  });
+  document.getElementById("quickAddTask").addEventListener("click", function(){
+    setQuickAdd(false);
+    setView("agenda");
+    var input = document.getElementById("generalTaskInput");
+    input.scrollIntoView({block:"center"});
+    input.focus({preventScroll:true});
+  });
+  document.addEventListener("click", function(event){
+    if(!quickAddOptions.hidden && !el.addBtn.parentElement.contains(event.target)) setQuickAdd(false);
+  });
+  el.addBtn.parentElement.addEventListener("keydown", function(event){
+    if(event.key === "Escape" && !quickAddOptions.hidden){
+      setQuickAdd(false);
+      el.addBtn.focus();
+    }
+  });
 
   el.fSchool.addEventListener("change", function(){
     if(el.fSchool.value){
