@@ -627,6 +627,15 @@
         <label for="f-notes">Notes (optional)</label>
         <textarea id="f-notes" maxlength="500" placeholder="Any details worth remembering"></textarea>
       </div>
+      <details class="field" id="eventShare" hidden>
+        <summary>Share event</summary>
+        <label><input type="checkbox" id="shareEventNotes"> Include notes</label>
+        <textarea id="shareEventPreview" rows="4" readonly aria-label="Event text to share"></textarea>
+        <div class="panel-actions">
+          <button type="button" class="btn btn-primary" id="sendEventShare" hidden>Share via…</button>
+          <button type="button" class="btn btn-ghost" id="copyEventShare">Copy event details</button>
+        </div>
+      </details>
       <div class="panel-actions">
         <button type="button" class="btn btn-ghost" id="eventDuplicate" hidden>Duplicate event</button>
         <button type="button" class="btn btn-ghost" id="eventEditOccurrence" hidden>Edit this occurrence</button>
@@ -2038,6 +2047,51 @@
   }
 
   var eventContext;
+  var eventShare = document.getElementById("eventShare");
+  var shareEventNotes = document.getElementById("shareEventNotes");
+  var shareEventPreview = document.getElementById("shareEventPreview");
+  var sendEventShare = document.getElementById("sendEventShare");
+  sendEventShare.hidden = typeof navigator.share !== "function";
+
+  function eventShareText(event, occurrenceDate, includeNotes){
+    var format = new Intl.DateTimeFormat(undefined, {
+      weekday:"long", day:"numeric", month:"long", year:"numeric"
+    });
+    var recurring = repeatMode(event);
+    var next = recurring && !occurrenceDate ? nextOccurrence(event, todayDate()) : null;
+    var first = recurring ? occurrenceDate || (next ? dateToStr(next) : event.date) : event.date;
+    var dateText = format.format(strToDate(first));
+    if(!recurring && event.endDate && event.endDate !== first)
+      dateText += " – " + format.format(strToDate(event.endDate));
+    if(event.time) dateText += " · " + formatTime(event.time);
+    return [displayTitle(event), dateText, includeNotes ? event.notes : ""].filter(Boolean).join("\n");
+  }
+
+  function refreshEventShare(){
+    shareEventPreview.value = eventShareText(eventContext.event, eventContext.date, shareEventNotes.checked);
+  }
+
+  shareEventNotes.addEventListener("change", refreshEventShare);
+  function selectEventShare(){
+    shareEventPreview.focus();
+    shareEventPreview.select();
+    shareEventPreview.setSelectionRange(0, shareEventPreview.value.length);
+    showToast("Event text selected. Copy it to share.");
+  }
+  document.getElementById("copyEventShare").addEventListener("click", async function(){
+    try{
+      await navigator.clipboard.writeText(shareEventPreview.value);
+      showToast("Event details copied");
+    }catch(error){selectEventShare();}
+  });
+  sendEventShare.addEventListener("click", async function(){
+    try{
+      await navigator.share({text:shareEventPreview.value});
+    }catch(error){
+      if(error.name !== "AbortError") selectEventShare();
+    }
+  });
+
   var duplicateEvent = document.getElementById("eventDuplicate");
   var editOccurrence = document.getElementById("eventEditOccurrence");
   var skipOccurrence = document.getElementById("eventSkipOccurrence");
@@ -2079,6 +2133,13 @@
 
     var editingSeries = opts.mode === "edit";
     var hasOccurrence = editingSeries && opts.date && repeatMode(opts.event) && occursOn(opts.event,strToDate(opts.date));
+    eventShare.hidden = !editingSeries;
+    eventShare.open = false;
+    shareEventNotes.checked = false;
+    if(editingSeries){
+      shareEventNotes.parentElement.hidden = !opts.event.notes;
+      refreshEventShare();
+    }
     duplicateEvent.hidden = !editingSeries;
     editOccurrence.hidden = skipOccurrence.hidden = !hasOccurrence;
     if(opts.event){
