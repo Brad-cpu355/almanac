@@ -187,6 +187,12 @@
   #generalTasks .task-row-meta .btn{margin-top:0;padding-inline:8px;white-space:nowrap}
   #generalTasks .task-add-controls .btn{min-height:44px}
   #generalTasks .task-edit-form[hidden]{display:none}
+  .astro-nights{display:grid;grid-template-columns:repeat(auto-fit,minmax(88px,1fr));gap:8px}
+  .astro-night{display:grid;gap:3px;font-size:.78rem;padding:7px;border-radius:6px;background:var(--surface-2)}
+  .astro-good{color:#17613c}
+  .astro-marginal{color:#795100}
+  .astro-avoid{color:#9a2730}
+  .astro-day-mark{font-size:.58rem;line-height:1}
   .filter-bar{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin:0 0 16px;}
   .filter-label{font-size:.72rem;color:var(--ink-faint);font-weight:600;margin-right:3px;}
   .filter-btn{border:1px solid var(--line);background:var(--surface);color:var(--ink-soft);border-radius:999px;padding:7px 12px;font-size:.78rem;font-weight:600;cursor:pointer;}
@@ -464,6 +470,12 @@
       </div>
     </section>
     <section class="view active" id="view-agenda">
+      <section class="school-card" id="astroForecast" aria-labelledby="astroHeading" hidden>
+        <h2 id="astroHeading">PhotonLog forecast</h2>
+        <p class="hint" id="astroStatus"></p>
+        <div class="astro-nights" id="astroNights"></div>
+        <p class="hint" id="astroCredit" hidden></p>
+      </section>
       <section class="school-card" aria-labelledby="weekHeading">
         <h2 id="weekHeading">This week</h2>
         <p class="hint" id="weekDates"></p>
@@ -1856,6 +1868,47 @@
     });
   }
 
+  var astroRatings = new Map();
+  async function loadAstroForecast(){
+    try{
+      var response = await fetch("/api/photonlog-forecast", {cache:"no-store"});
+      if(!response.ok) return;
+      var result = await response.json();
+      if(!result.forecast) return;
+      var forecast = result.forecast;
+      var today = dateToStr(todayDate());
+      var nights = forecast.nights.filter(function(night){ return night.date >= today; });
+      if(!nights.length) return;
+      var list = document.getElementById("astroNights");
+      list.replaceChildren();
+      nights.forEach(function(night){
+        astroRatings.set(night.date, night.rating);
+        var card = document.createElement("div");
+        card.className = "astro-night";
+        var date = document.createElement("span");
+        date.textContent = strToDate(night.date).toLocaleDateString(undefined,{weekday:"short",day:"numeric",month:"short"});
+        var rating = document.createElement("strong");
+        rating.className = "astro-" + night.rating.toLowerCase();
+        rating.textContent = night.rating;
+        card.append(date,rating);
+        list.appendChild(card);
+      });
+      var updated = new Date(forecast.forecastAt).toLocaleString();
+      document.getElementById("astroStatus").textContent = [forecast.site, result.stale ? "Stale forecast" : "", "Updated " + updated].filter(Boolean).join(" · ");
+      var credit = document.getElementById("astroCredit");
+      credit.textContent = forecast.attribution;
+      credit.hidden = !forecast.attribution;
+      document.getElementById("astroForecast").hidden = false;
+      if(UI.view === "year"){
+        var scroll = window.scrollY;
+        renderYear();
+        window.scrollTo(0, scroll);
+      }
+    }catch(error){
+      console.warn("PhotonLog forecast unavailable", error);
+    }
+  }
+
   function buildMonthWeek(monthStart, monthEnd, firstDay, singleDays, ranges, today){
     var week = document.createElement("div");
     week.className = "month-week";
@@ -1882,6 +1935,16 @@
       }).join("");
       if(singleEvents.length > 3) dots += '<span class="more">+' + (singleEvents.length - 3) + '</span>';
       cell.innerHTML = '<span>' + day + '</span><span class="day-dots" aria-hidden="true">' + dots + '</span>';
+      var astroRating = astroRatings.get(key);
+      if(astroRating){
+        var mark = document.createElement("span");
+        mark.className = "astro-day-mark astro-" + astroRating.toLowerCase();
+        mark.textContent = "✦";
+        mark.setAttribute("aria-hidden","true");
+        cell.firstElementChild.append(" ",mark);
+        cell.title = "PhotonLog: " + astroRating;
+        cell.setAttribute("aria-label", cell.getAttribute("aria-label") + ", PhotonLog forecast: " + astroRating);
+      }
       cell.addEventListener("click", function(){ openDayModal(this.dataset.date); });
       week.appendChild(cell);
     }
@@ -2546,6 +2609,7 @@
   });
   setView(UI.view);
   setFilter(UI.filter);
+  loadAstroForecast();
   Store.init().then(function(){
     if(UI.view === "year") scrollToCurrentMonth();
   });
