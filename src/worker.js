@@ -39,7 +39,7 @@ const PHOTONLOG_REFRESH_MS = 60 * 60 * 1000;
 const PHOTONLOG_RATINGS = new Set(["Good", "Marginal", "Avoid"]);
 
 async function readPhotonLogForecast(env){
-  if(!env.PHOTONLOG_FORECAST_URL || !env.PHOTONLOG_ACCESS_CLIENT_ID || !env.PHOTONLOG_ACCESS_CLIENT_SECRET)
+  if(!env.PHOTONLOG_VPC && (!env.PHOTONLOG_FORECAST_URL || !env.PHOTONLOG_ACCESS_CLIENT_ID || !env.PHOTONLOG_ACCESS_CLIENT_SECRET))
     return json({forecast:null});
 
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS photonlog_forecast (
@@ -52,17 +52,19 @@ async function readPhotonLogForecast(env){
     return show(JSON.parse(cached.payload));
 
   try{
-    const endpoint = new URL(env.PHOTONLOG_FORECAST_URL);
-    if(endpoint.protocol !== "https:" || endpoint.username || endpoint.password)
-      throw new Error("Invalid forecast endpoint");
-    const response = await fetch(endpoint, {
-      redirect:"error", signal:AbortSignal.timeout(8000),
-      headers:{
-        "Accept":"application/json",
-        "CF-Access-Client-Id":env.PHOTONLOG_ACCESS_CLIENT_ID,
-        "CF-Access-Client-Secret":env.PHOTONLOG_ACCESS_CLIENT_SECRET
-      }
-    });
+    const signal = AbortSignal.timeout(8000);
+    const options = {redirect:"error", signal, headers:{"Accept":"application/json"}};
+    let response;
+    if(env.PHOTONLOG_VPC){
+      response = await env.PHOTONLOG_VPC.fetch("http://photonlog.internal/api/almanac/forecast", options);
+    }else{
+      const endpoint = new URL(env.PHOTONLOG_FORECAST_URL);
+      if(endpoint.protocol !== "https:" || endpoint.username || endpoint.password)
+        throw new Error("Invalid forecast endpoint");
+      options.headers["CF-Access-Client-Id"] = env.PHOTONLOG_ACCESS_CLIENT_ID;
+      options.headers["CF-Access-Client-Secret"] = env.PHOTONLOG_ACCESS_CLIENT_SECRET;
+      response = await fetch(endpoint, options);
+    }
     if(!response.ok) throw new Error("Forecast unavailable");
     const data = await response.json();
     if(typeof data.site !== "string" || !Number.isFinite(Date.parse(data.forecastAt)) ||
