@@ -23,3 +23,7 @@ database_id = "f50b5543-5c47-4956-930c-ba9473650b6f"
 [[vpc_services]]
 binding = "PHOTONLOG_VPC"
 service_id = "01a21c44-b7a5-7b03-95bf-4737bf456d9f"
+
+[triggers]
+# The Worker selects 18:00 Europe/Stockholm, including daylight saving time.
+crons = ["0 16,17 * * *"]
