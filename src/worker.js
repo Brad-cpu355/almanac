@@ -53,10 +53,10 @@ async function readPhotonLogForecast(env){
 
   try{
     const signal = AbortSignal.timeout(8000);
-    const options = {redirect:"error", signal, headers:{"Accept":"application/json"}};
+    const options = {redirect:"manual", signal, headers:{"Accept":"application/json"}};
     let response;
     if(env.PHOTONLOG_VPC){
-      response = await env.PHOTONLOG_VPC.fetch("http://photonlog.internal/api/almanac/forecast", options);
+      response = await env.PHOTONLOG_VPC.fetch("http://127.0.0.1:5153/api/almanac/forecast", options);
     }else{
       const endpoint = new URL(env.PHOTONLOG_FORECAST_URL);
       if(endpoint.protocol !== "https:" || endpoint.username || endpoint.password)
