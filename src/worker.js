@@ -35,7 +35,65 @@ export default {
   },
 };
 
+const PHOTONLOG_REFRESH_MS = 60 * 60 * 1000;
+const PHOTONLOG_RATINGS = new Set(["Good", "Marginal", "Avoid"]);
+
+async function readPhotonLogForecast(env){
+  if(!env.PHOTONLOG_VPC && (!env.PHOTONLOG_FORECAST_URL || !env.PHOTONLOG_ACCESS_CLIENT_ID || !env.PHOTONLOG_ACCESS_CLIENT_SECRET))
+    return json({forecast:null});
+
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS photonlog_forecast (
+    id INTEGER PRIMARY KEY CHECK(id=1), payload TEXT NOT NULL, fetched_at INTEGER NOT NULL
+  )`).run();
+  const cached = await env.DB.prepare("SELECT payload, fetched_at FROM photonlog_forecast WHERE id=1").first();
+  const stale = forecast => Date.now() - Date.parse(forecast.forecastAt) >= PHOTONLOG_REFRESH_MS;
+  const show = (forecast, offline = false) => json({forecast, stale:offline || stale(forecast)});
+  if(cached && Date.now() - cached.fetched_at < PHOTONLOG_REFRESH_MS)
+    return show(JSON.parse(cached.payload));
+
+  try{
+    const signal = AbortSignal.timeout(8000);
+    const options = {redirect:"manual", signal, headers:{"Accept":"application/json"}};
+    let response;
+    if(env.PHOTONLOG_VPC){
+      response = await env.PHOTONLOG_VPC.fetch("http://127.0.0.1:5153/api/almanac/forecast", options);
+    }else{
+      const endpoint = new URL(env.PHOTONLOG_FORECAST_URL);
+      if(endpoint.protocol !== "https:" || endpoint.username || endpoint.password)
+        throw new Error("Invalid forecast endpoint");
+      options.headers["CF-Access-Client-Id"] = env.PHOTONLOG_ACCESS_CLIENT_ID;
+      options.headers["CF-Access-Client-Secret"] = env.PHOTONLOG_ACCESS_CLIENT_SECRET;
+      response = await fetch(endpoint, options);
+    }
+    if(!response.ok) throw new Error("Forecast unavailable");
+    const data = await response.json();
+    if(typeof data.site !== "string" || !Number.isFinite(Date.parse(data.forecastAt)) ||
+       !Array.isArray(data.nights) || !data.nights.length || data.nights.length > 14)
+      throw new Error("Invalid forecast");
+    const nights = data.nights.map(night => {
+      if(typeof night?.date !== "string" || !PHOTONLOG_RATINGS.has(night.rating))
+        throw new Error("Invalid forecast night");
+      return {date:optionalDate(night.date), rating:night.rating};
+    });
+    if(nights.some(night => !night.date) || new Set(nights.map(night => night.date)).size !== nights.length)
+      throw new Error("Invalid forecast dates");
+    const forecast = {
+      site:data.site.trim().slice(0,120), forecastAt:data.forecastAt,
+      attribution:typeof data.attribution === "string" ? data.attribution.slice(0,300) : "",
+      nights:nights.sort((a,b) => a.date.localeCompare(b.date))
+    };
+    await env.DB.prepare(`INSERT INTO photonlog_forecast (id,payload,fetched_at) VALUES (1,?,?)
+      ON CONFLICT(id) DO UPDATE SET payload=excluded.payload, fetched_at=excluded.fetched_at`)
+      .bind(JSON.stringify(forecast),Date.now()).run();
+    return show(forecast);
+  }catch{
+    return cached ? show(JSON.parse(cached.payload),true) : json({forecast:null, unavailable:true});
+  }
+}
+
 async function handleApi(request, env, url) {
+  if(request.method === "GET" && url.pathname === "/api/photonlog-forecast")
+    return readPhotonLogForecast(env);
   const segments = url.pathname.split("/").filter(Boolean); // ["api", "events", id?]
   if (segments[1] === "auth" && segments[2] === "google") return handleGoogleAuth(request, env, url, segments[3]);
   if (segments[1] === "personal-email") return handlePersonalEmail(request, env, url, segments[2]);
