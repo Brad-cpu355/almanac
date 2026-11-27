@@ -187,8 +187,6 @@
   #generalTasks .task-row-meta .btn{margin-top:0;padding-inline:8px;white-space:nowrap}
   #generalTasks .task-add-controls .btn{min-height:44px}
   #generalTasks .task-edit-form[hidden]{display:none}
-  .astro-nights{display:grid;grid-template-columns:repeat(auto-fit,minmax(88px,1fr));gap:8px}
-  .astro-night{display:grid;gap:3px;font-size:.78rem;padding:7px;border-radius:6px;background:var(--surface-2)}
   .astro-good{color:#17613c}
   .astro-marginal{color:#795100}
   .astro-avoid{color:#9a2730}
@@ -473,12 +471,6 @@
       </div>
     </section>
     <section class="view active" id="view-agenda">
-      <section class="school-card" id="astroForecast" aria-labelledby="astroHeading" hidden>
-        <h2 id="astroHeading">PhotonLog forecast</h2>
-        <p class="hint" id="astroStatus"></p>
-        <div class="astro-nights" id="astroNights"></div>
-        <p class="hint" id="astroCredit" hidden></p>
-      </section>
       <section class="school-card" aria-labelledby="weekHeading">
         <h2 id="weekHeading">This week</h2>
         <p class="hint" id="weekDates"></p>
@@ -577,6 +569,7 @@
         </button>
       </div>
       <button type="button" class="year-jump" id="yearJump">Jump to this year</button>
+      <p class="hint" id="astroStatus" hidden></p>
       <div class="month-grid" id="monthGrid"></div>
     </section>
   </main>
@@ -1882,26 +1875,13 @@
       var today = dateToStr(todayDate());
       var nights = forecast.nights.filter(function(night){ return night.date >= today; });
       if(!nights.length) return;
-      var list = document.getElementById("astroNights");
-      list.replaceChildren();
       nights.forEach(function(night){
         astroRatings.set(night.date, night.rating);
-        var card = document.createElement("div");
-        card.className = "astro-night";
-        var date = document.createElement("span");
-        date.textContent = strToDate(night.date).toLocaleDateString(undefined,{weekday:"short",day:"numeric",month:"short"});
-        var rating = document.createElement("strong");
-        rating.className = "astro-" + night.rating.toLowerCase();
-        rating.textContent = night.rating;
-        card.append(date,rating);
-        list.appendChild(card);
       });
-      var updated = new Date(forecast.forecastAt).toLocaleString();
-      document.getElementById("astroStatus").textContent = [forecast.site, result.stale ? "Stale forecast" : "", "Updated " + updated].filter(Boolean).join(" · ");
-      var credit = document.getElementById("astroCredit");
-      credit.textContent = forecast.attribution;
-      credit.hidden = !forecast.attribution;
-      document.getElementById("astroForecast").hidden = false;
+      var status = document.getElementById("astroStatus");
+      var forecastLabel = result.stale ? "Stale PhotonLog forecast" : "PhotonLog forecast";
+      status.textContent = [forecastLabel, forecast.attribution].filter(Boolean).join(" · ");
+      status.hidden = false;
       if(UI.view === "year"){
         var scroll = window.scrollY;
         renderYear();
