@@ -91,7 +91,7 @@
   .quick-add-options .btn{justify-content:center;min-height:44px}
   @media (max-width:600px){
     .topbar-actions{width:100%;flex-direction:column;align-items:stretch}
-    .topbar-actions .segmented{display:grid;grid-template-columns:repeat(4,minmax(0,1fr))}
+    .topbar-actions .segmented{display:grid;grid-template-columns:repeat(5,minmax(0,1fr))}
     .topbar-actions .segmented button{padding-inline:4px}
     .quick-add{width:min(100%, 20rem);align-self:center}
     #addBtn{width:100%}
@@ -187,6 +187,16 @@
   #generalTasks .task-row-meta .btn{margin-top:0;padding-inline:8px;white-space:nowrap}
   #generalTasks .task-add-controls .btn{min-height:44px}
   #generalTasks .task-edit-form[hidden]{display:none}
+  #shoppingJump:not([hidden]){margin-bottom:12px}
+  .list-form,.list-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .list-actions{margin-top:20px}
+  .list-form textarea{flex:1;min-width:0;min-height:44px;font:inherit;font-size:1rem;padding:8px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink)}
+  .checklist{list-style:none;padding:0;margin:0 0 12px}
+  .checklist li{display:flex;gap:8px;align-items:center;border-bottom:1px solid var(--line)}
+  .checklist label{display:flex;flex:1;min-width:0;min-height:44px;gap:10px;align-items:center;overflow-wrap:anywhere;cursor:pointer}
+  .checklist input{width:20px;height:20px;flex:none;accent-color:var(--accent)}
+  .checklist button{min-width:44px;min-height:44px}
+  #listCompletedItems label span{text-decoration:line-through}
   .astro-good{color:#17613c}
   .astro-marginal{color:#795100}
   .astro-avoid{color:#9a2730}
@@ -433,6 +443,7 @@
         <button type="button" data-view="year">Year</button>
         <button type="button" data-view="school">School <span id="schoolTabBadge" class="review-badge" hidden></span></button>
         <button type="button" data-view="personal">Personal <span id="personalTabBadge" class="review-badge" hidden></span></button>
+        <button type="button" data-view="lists">Lists</button>
       </div>
       <div class="quick-add">
         <button type="button" class="btn btn-primary" id="addBtn" aria-expanded="false" aria-controls="quickAddOptions">+ Add event/Task</button>
@@ -471,6 +482,7 @@
       </div>
     </section>
     <section class="view active" id="view-agenda">
+      <button type="button" class="btn btn-ghost" id="shoppingJump" hidden></button>
       <section class="school-card" aria-labelledby="weekHeading">
         <h2 id="weekHeading">This week</h2>
         <p class="hint" id="weekDates"></p>
@@ -558,6 +570,32 @@
       </div>
     </section>
 
+    <section class="view" id="view-lists">
+      <section class="school-card" aria-labelledby="listsHeading">
+        <h2 id="listsHeading">Lists</h2>
+        <div id="listPicker" class="filter-bar" aria-label="Choose a list"></div>
+        <button type="button" class="btn btn-ghost" id="newList">New list</button>
+        <p id="listStatus" class="hint" role="status"></p>
+        <div id="listContents" hidden>
+          <h3 id="listName"></h3>
+          <form id="listItemForm" class="list-form">
+            <textarea id="listItemInput" rows="2" aria-label="Items to add" placeholder="Add items, one per line" required></textarea>
+            <button class="btn btn-primary" type="submit">Add</button>
+          </form>
+          <p class="hint" id="listRemaining"></p>
+          <ul id="listOpenItems" class="checklist"></ul>
+          <div id="listCompletedSection" hidden>
+            <h4>Completed</h4>
+            <ul id="listCompletedItems" class="checklist"></ul>
+            <button type="button" class="btn btn-ghost" id="clearListItems">Clear checked items</button>
+          </div>
+          <div class="list-actions">
+            <button type="button" class="btn btn-ghost" id="renameList">Rename list</button>
+            <button type="button" class="btn btn-ghost" id="deleteList">Delete list</button>
+          </div>
+        </div>
+      </section>
+    </section>
     <section class="view" id="view-year">
       <div class="year-nav">
         <button type="button" class="btn-icon" id="yearPrev" aria-label="Previous year">
@@ -871,7 +909,7 @@
   (function loadUI(){
     try{
       var raw = localStorage.getItem("almanac-ui");
-      if(raw){ var p = JSON.parse(raw); if(p.view === "agenda" || p.view === "year" || p.view === "school" || p.view === "personal") UI.view = p.view; if(["all","school","walter","ingalill","other"].indexOf(p.filter) !== -1) UI.filter = p.filter; if(Array.isArray(p.categories)) UI.categories = CATEGORY_ORDER.filter(function(key){ return p.categories.includes(key); }); }
+      if(raw){ var p = JSON.parse(raw); if(p.view === "agenda" || p.view === "year" || p.view === "school" || p.view === "personal" || p.view === "lists") UI.view = p.view; if(["all","school","walter","ingalill","other"].indexOf(p.filter) !== -1) UI.filter = p.filter; if(Array.isArray(p.categories)) UI.categories = CATEGORY_ORDER.filter(function(key){ return p.categories.includes(key); }); }
     }catch(e){}
   })();
   function saveUI(){ try{ localStorage.setItem("almanac-ui", JSON.stringify({view:UI.view,filter:UI.filter,categories:UI.categories})); }catch(e){} }
@@ -967,15 +1005,176 @@
     el.viewYear.classList.toggle("active", v==="year");
     el.viewSchool.classList.toggle("active", v==="school");
     el.viewPersonal.classList.toggle("active", v==="personal");
-    el.mainFilters.hidden = v==="school" || v==="personal";
+    document.getElementById("view-lists").classList.toggle("active", v==="lists");
+    document.getElementById("almanacSearch").closest("section").hidden = v==="lists";
+    el.mainFilters.hidden = v==="school" || v==="personal" || v==="lists";
     document.getElementById("categoryFilters").hidden = el.mainFilters.hidden;
     if(v==="school") renderSchoolTab();
+    if(v==="lists" || v==="agenda") {
+      renderLists();
+      refreshLists().catch(function(){});
+    }
     if(v==="year"){
       renderYear();
       scrollToCurrentMonth();
     }
   }
   el.segButtons.forEach(function(b){ b.addEventListener("click", function(){ setView(b.dataset.view); }); });
+
+
+  /* ---------------- Lists ---------------- */
+  var checklists = [];
+  var activeListId = "shopping";
+  var listRequest = 0;
+  var listSaving = false;
+  var listItemInput = document.getElementById("listItemInput");
+  var listItemForm = document.getElementById("listItemForm");
+  var listStatus = document.getElementById("listStatus");
+
+  async function listApi(path, method, data){
+    var response = await fetch("/api/lists" + path, {
+      method:method, cache:"no-store",
+      headers:data ? {"Content-Type":"application/json"} : undefined,
+      body:data ? JSON.stringify(data) : undefined
+    });
+    var result = await response.json();
+    if(!response.ok) throw new Error(result.error || "Lists are unavailable");
+    return result;
+  }
+
+  async function refreshLists(){
+    var request = ++listRequest;
+    try{
+      var result = await listApi("", "GET");
+      if(request !== listRequest) return;
+      checklists = result;
+      listStatus.textContent = "";
+      renderLists();
+    }catch(error){
+      if(request === listRequest) listStatus.textContent = "Could not load lists. Try opening Lists again.";
+      throw error;
+    }
+  }
+
+  function renderLists(){
+    var shopping = checklists.find(function(list){ return list.id === "shopping"; });
+    var jump = document.getElementById("shoppingJump");
+    jump.hidden = !shopping;
+    if(shopping) jump.textContent = shopping.name + " · " + shopping.items.filter(function(item){ return !item.checked; }).length + " left";
+
+    var selected = checklists.find(function(list){ return list.id === activeListId; }) || checklists[0];
+    document.getElementById("listContents").hidden = !selected;
+    if(!selected) return;
+    activeListId = selected.id;
+    var picker = document.getElementById("listPicker");
+    picker.replaceChildren();
+    checklists.forEach(function(list){
+      var button = document.createElement("button");
+      button.type = "button";
+      button.className = "filter-btn" + (list.id === activeListId ? " active" : "");
+      button.textContent = list.name;
+      button.setAttribute("aria-pressed", String(list.id === activeListId));
+      button.addEventListener("click", function(){
+        if(listSaving || list.id === activeListId) return;
+        activeListId = list.id;
+        listItemInput.value = "";
+        renderLists();
+      });
+      picker.appendChild(button);
+    });
+    document.getElementById("listName").textContent = selected.name;
+    document.getElementById("deleteList").hidden = selected.id === "shopping";
+    var open = document.getElementById("listOpenItems");
+    var completed = document.getElementById("listCompletedItems");
+    open.replaceChildren();
+    completed.replaceChildren();
+    selected.items.forEach(function(item){
+      var row = document.createElement("li");
+      var label = document.createElement("label");
+      var checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.checked = item.checked;
+      var text = document.createElement("span");
+      text.textContent = item.label;
+      label.append(checkbox, text);
+      var remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "btn btn-ghost";
+      remove.textContent = "×";
+      remove.setAttribute("aria-label", "Remove " + item.label);
+      var path = "/" + selected.id + "/items/" + item.id;
+      checkbox.addEventListener("change", function(){
+        var checked = checkbox.checked;
+        checkbox.checked = item.checked;
+        saveListChange(path, "PATCH", {checked:checked});
+      });
+      remove.addEventListener("click", function(){ saveListChange(path, "DELETE"); });
+      row.append(label, remove);
+      (item.checked ? completed : open).appendChild(row);
+    });
+    document.getElementById("listRemaining").textContent = open.children.length + " left";
+    document.getElementById("listCompletedSection").hidden = !completed.children.length;
+  }
+
+  async function saveListChange(path, method, data, afterSave){
+    if(listSaving) return;
+    listSaving = true;
+    listStatus.textContent = "Saving…";
+    try{
+      var result = await listApi(path, method, data);
+      if(afterSave) afterSave(result);
+      listStatus.textContent = "";
+      await refreshLists();
+    }catch(error){
+      listStatus.textContent = error.message || "Could not save the list";
+    }finally{
+      listSaving = false;
+    }
+  }
+
+  listItemForm.addEventListener("submit", function(event){
+    event.preventDefault();
+    var draft = listItemInput.value;
+    var items = draft.split(/\r?\n/).map(function(line){ return line.trim(); }).filter(Boolean);
+    if(!items.length) return;
+    saveListChange("/" + activeListId + "/items", "POST", {items:items}, function(){
+      if(listItemInput.value === draft) listItemInput.value = "";
+    });
+  });
+  listItemInput.addEventListener("keydown", function(event){
+    if(event.key === "Enter" && !event.shiftKey && !event.isComposing){
+      event.preventDefault();
+      listItemForm.requestSubmit();
+    }
+  });
+  document.getElementById("shoppingJump").addEventListener("click", function(){
+    activeListId = "shopping";
+    listItemInput.value = "";
+    setView("lists");
+  });
+  document.getElementById("newList").addEventListener("click", function(){
+    var name = window.prompt("List name");
+    if(name && name.trim()) saveListChange("", "POST", {name:name}, function(result){
+      activeListId = result.id;
+      listItemInput.value = "";
+    });
+  });
+  document.getElementById("renameList").addEventListener("click", function(){
+    var name = window.prompt("List name", document.getElementById("listName").textContent);
+    if(name && name.trim()) saveListChange("/" + activeListId, "PATCH", {name:name});
+  });
+  document.getElementById("deleteList").addEventListener("click", function(){
+    if(window.confirm("Delete this list and all its items?")){
+      saveListChange("/" + activeListId, "DELETE", undefined, function(){ listItemInput.value = ""; });
+    }
+  });
+  document.getElementById("clearListItems").addEventListener("click", function(){
+    if(window.confirm("Clear all checked items?")) saveListChange("/" + activeListId + "/items", "DELETE");
+  });
+  document.addEventListener("visibilitychange", function(){
+    if(!document.hidden && !listSaving && (UI.view === "lists" || UI.view === "agenda"))
+      refreshLists().catch(function(){});
+  });
 
   /* ---------------- Gmail connection (development preview only) ---------------- */
   async function loadGmailStatus(){

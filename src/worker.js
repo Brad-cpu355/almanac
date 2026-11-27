@@ -96,6 +96,93 @@ async function readPhotonLogForecast(env){
   }
 }
 
+
+async function ensureLists(db) {
+  await db.batch([
+    db.prepare(`CREATE TABLE IF NOT EXISTS checklists (
+      id TEXT PRIMARY KEY, name TEXT NOT NULL
+    )`),
+    db.prepare(`CREATE TABLE IF NOT EXISTS checklist_items (
+      id TEXT PRIMARY KEY, list_id TEXT NOT NULL REFERENCES checklists(id) ON DELETE CASCADE,
+      label TEXT NOT NULL, checked INTEGER NOT NULL DEFAULT 0
+    )`),
+    db.prepare("CREATE INDEX IF NOT EXISTS checklist_items_list ON checklist_items(list_id)"),
+    db.prepare("INSERT OR IGNORE INTO checklists (id, name) VALUES ('shopping', 'Shopping')")
+  ]);
+}
+
+function listText(value, limit, label) {
+  if (typeof value !== "string" || !value.trim() || value.trim().length > limit)
+    throw new ValidationError(label + " must be between 1 and " + limit + " characters");
+  return value.trim();
+}
+
+async function handleLists(request, db, url, [listId, section, itemId, ...extra]) {
+  const method = request.method;
+  if (method !== "GET" && request.headers.get("origin") !== url.origin)
+    return json({error:"Invalid request origin"}, 403);
+  if (extra.length) return json({error:"Not found"}, 404);
+
+  await ensureLists(db);
+  if (!listId && method === "GET") {
+    const {results} = await db.prepare(`SELECT l.id, l.name, i.id AS item_id, i.label, i.checked
+      FROM checklists l LEFT JOIN checklist_items i ON i.list_id = l.id
+      ORDER BY l.id <> 'shopping', l.name COLLATE NOCASE, l.id, i.rowid`).all();
+    const lists = new Map();
+    for (const row of results) {
+      if (!lists.has(row.id)) lists.set(row.id, {id:row.id, name:row.name, items:[]});
+      if (row.item_id) lists.get(row.id).items.push({id:row.item_id, label:row.label, checked:!!row.checked});
+    }
+    return json([...lists.values()]);
+  }
+  if (!listId && method === "POST") {
+    const input = await request.json().catch(() => null);
+    const name = listText(input?.name, 80, "List name");
+    const id = crypto.randomUUID();
+    await db.prepare("INSERT INTO checklists (id, name) VALUES (?, ?)").bind(id, name).run();
+    return json({id}, 201);
+  }
+
+  if (!section && method === "PATCH") {
+    const input = await request.json().catch(() => null);
+    const name = listText(input?.name, 80, "List name");
+    const result = await db.prepare("UPDATE checklists SET name=? WHERE id=?").bind(name, listId).run();
+    return result.meta.changes ? json({ok:true}) : json({error:"List not found"}, 404);
+  }
+  if (!section && method === "DELETE" && listId !== "shopping") {
+    await db.prepare("DELETE FROM checklists WHERE id=?").bind(listId).run();
+    return json({ok:true});
+  }
+  if (section !== "items") return json({error:"Not found"}, 404);
+
+  if (!itemId && method === "POST") {
+    const input = await request.json().catch(() => null);
+    if (!Array.isArray(input?.items) || !input.items.length || input.items.length > 50)
+      throw new ValidationError("Add between 1 and 50 items at a time");
+    const labels = input.items.map(label => listText(label, 200, "Item"));
+    const result = await db.batch(labels.map(label =>
+      db.prepare(`INSERT INTO checklist_items (id, list_id, label)
+        SELECT ?, id, ? FROM checklists WHERE id=?`).bind(crypto.randomUUID(), label, listId)));
+    return result[0].meta.changes ? json({ok:true}, 201) : json({error:"List not found"}, 404);
+  }
+  if (!itemId && method === "DELETE") {
+    await db.prepare("DELETE FROM checklist_items WHERE list_id=? AND checked=1").bind(listId).run();
+    return json({ok:true});
+  }
+  if (itemId && method === "PATCH") {
+    const input = await request.json().catch(() => null);
+    if (typeof input?.checked !== "boolean") throw new ValidationError("Choose whether the item is checked");
+    const result = await db.prepare("UPDATE checklist_items SET checked=? WHERE list_id=? AND id=?")
+      .bind(Number(input.checked), listId, itemId).run();
+    return result.meta.changes ? json({ok:true}) : json({error:"Item not found"}, 404);
+  }
+  if (itemId && method === "DELETE") {
+    await db.prepare("DELETE FROM checklist_items WHERE list_id=? AND id=?").bind(listId, itemId).run();
+    return json({ok:true});
+  }
+  return json({error:"Not found"}, 404);
+}
+
 async function handleApi(request, env, url) {
   if(request.method === "GET" && url.pathname === "/api/photonlog-forecast")
     return readPhotonLogForecast(env);
@@ -104,6 +191,7 @@ async function handleApi(request, env, url) {
   if (segments[1] === "personal-email") return handlePersonalEmail(request, env, url, segments[2]);
   if (segments[1] === "school-email") return handleSchoolEmail(request, env, url, segments[2]);
   if (segments[1] === "school-notices") return handleSchoolNotices(request, env, segments[2]);
+  if (segments[1] === "lists") return handleLists(request, env.DB, url, segments.slice(2));
   if (segments[1] === "tasks") return handleTasks(request, env, segments[2]);
   if (segments[1] !== "events") return json({ error: "Not found" }, 404);
 
