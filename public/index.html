@@ -191,6 +191,8 @@
   .list-form,.list-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
   .list-actions{margin-top:20px}
   .list-form textarea{flex:1;min-width:0;min-height:44px;font:inherit;font-size:1rem;padding:8px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink)}
+  #listUnlockForm,#listPasswordForm{display:grid;justify-items:start;gap:8px}
+  #listUnlockForm input,#listPasswordForm input{width:min(100%,340px);min-height:44px;font:inherit}
   .checklist{list-style:none;padding:0;margin:0 0 12px}
   .checklist li{display:flex;gap:8px;align-items:center;border-bottom:1px solid var(--line)}
   .checklist label{display:flex;flex:1;min-width:0;min-height:44px;gap:10px;align-items:center;overflow-wrap:anywhere;cursor:pointer}
@@ -576,6 +578,11 @@
         <div id="listPicker" class="filter-bar" aria-label="Choose a list"></div>
         <button type="button" class="btn btn-ghost" id="newList">New list</button>
         <p id="listStatus" class="hint" role="status"></p>
+        <form id="listUnlockForm" class="list-form" hidden>
+          <label for="listUnlockPassword">List password</label>
+          <input id="listUnlockPassword" type="password" autocomplete="current-password" required maxlength="128">
+          <button type="submit" class="btn btn-primary">Unlock</button>
+        </form>
         <div id="listContents" hidden>
           <h3 id="listName"></h3>
           <form id="listItemForm" class="list-form">
@@ -589,7 +596,17 @@
             <ul id="listCompletedItems" class="checklist"></ul>
             <button type="button" class="btn btn-ghost" id="clearListItems">Clear checked items</button>
           </div>
+          <form id="listPasswordForm" class="list-form" hidden>
+            <label for="listNewPassword">New password (at least 8 characters)</label>
+            <input id="listNewPassword" type="password" autocomplete="new-password" required minlength="8" maxlength="128">
+            <label for="listConfirmPassword">Confirm password</label>
+            <input id="listConfirmPassword" type="password" autocomplete="new-password" required minlength="8" maxlength="128">
+            <button type="submit" class="btn btn-primary">Set password and lock</button>
+            <button type="button" class="btn btn-ghost" id="cancelListPassword">Cancel</button>
+          </form>
           <div class="list-actions">
+            <button type="button" class="btn btn-ghost" id="listLockButton">Lock list</button>
+            <button type="button" class="btn btn-ghost" id="removeListPassword" hidden>Remove password</button>
             <button type="button" class="btn btn-ghost" id="renameList">Rename list</button>
             <button type="button" class="btn btn-ghost" id="deleteList">Delete list</button>
           </div>
@@ -996,6 +1013,7 @@
 
   /* ---------------- View switching ---------------- */
   function setView(v){
+    if(v !== "lists" && UI.view === "lists") forgetListUnlock();
     UI.view = v; saveUI();
     el.segButtons.forEach(function(b){ b.classList.toggle("active", b.dataset.view===v); });
     el.viewAgenda.classList.toggle("active", v==="agenda");
@@ -1027,14 +1045,38 @@
   var activeListId = "shopping";
   var listRequest = 0;
   var listSaving = false;
+  var listUnlockToken = "";
+  var listUnlockTimer;
+  var listPrivacyVersion = 0;
+  var listUnlockForm = document.getElementById("listUnlockForm");
+  var listPasswordForm = document.getElementById("listPasswordForm");
+
+  function forgetListUnlock(){
+    ++listPrivacyVersion;
+    ++listRequest;
+    clearTimeout(listUnlockTimer);
+    listUnlockForm.reset();
+    listPasswordForm.reset();
+    listPasswordForm.hidden = true;
+    if(!listUnlockToken) return;
+    listUnlockToken = "";
+    checklists = checklists.map(function(list){
+      return list.locked ? {id:list.id, locked:true} : list;
+    });
+    listItemInput.value = "";
+    renderLists();
+  }
   var listItemInput = document.getElementById("listItemInput");
   var listItemForm = document.getElementById("listItemForm");
   var listStatus = document.getElementById("listStatus");
 
-  async function listApi(path, method, data){
+  async function listApi(path, method, data, token = listUnlockToken){
+    var headers = {};
+    if(data) headers["Content-Type"] = "application/json";
+    if(token) headers["X-List-Unlock"] = token;
     var response = await fetch("/api/lists" + path, {
       method:method, cache:"no-store",
-      headers:data ? {"Content-Type":"application/json"} : undefined,
+      headers:headers,
       body:data ? JSON.stringify(data) : undefined
     });
     var result = await response.json();
@@ -1059,11 +1101,13 @@
   function renderLists(){
     var shopping = checklists.find(function(list){ return list.id === "shopping"; });
     var jump = document.getElementById("shoppingJump");
-    jump.hidden = !shopping;
-    if(shopping) jump.textContent = shopping.name + " · " + shopping.items.filter(function(item){ return !item.checked; }).length + " left";
+    jump.hidden = !shopping || shopping.locked;
+    jump.textContent = jump.hidden ? "" : shopping.name + " · " + shopping.items.filter(function(item){ return !item.checked; }).length + " left";
 
     var selected = checklists.find(function(list){ return list.id === activeListId; }) || checklists[0];
-    document.getElementById("listContents").hidden = !selected;
+    var needsPassword = selected?.locked && !selected.unlocked;
+    document.getElementById("listContents").hidden = !selected || needsPassword;
+    listUnlockForm.hidden = !needsPassword;
     if(!selected) return;
     activeListId = selected.id;
     var picker = document.getElementById("listPicker");
@@ -1072,17 +1116,26 @@
       var button = document.createElement("button");
       button.type = "button";
       button.className = "filter-btn" + (list.id === activeListId ? " active" : "");
-      button.textContent = list.name;
+      button.textContent = list.locked && !list.unlocked ? "🔒 Private list" : list.name;
       button.setAttribute("aria-pressed", String(list.id === activeListId));
       button.addEventListener("click", function(){
         if(listSaving || list.id === activeListId) return;
+        forgetListUnlock();
         activeListId = list.id;
         listItemInput.value = "";
         renderLists();
       });
       picker.appendChild(button);
     });
-    document.getElementById("listName").textContent = selected.name;
+    document.getElementById("listName").textContent = needsPassword ? "" : selected.name;
+    document.getElementById("listLockButton").textContent = selected.locked ? "Lock now" : "Lock list";
+    document.getElementById("removeListPassword").hidden = !selected.locked;
+    if(needsPassword){
+      document.getElementById("listOpenItems").replaceChildren();
+      document.getElementById("listCompletedItems").replaceChildren();
+      document.getElementById("listRemaining").textContent = "";
+      return;
+    }
     document.getElementById("deleteList").hidden = selected.id === "shopping";
     var open = document.getElementById("listOpenItems");
     var completed = document.getElementById("listCompletedItems");
@@ -1148,6 +1201,7 @@
     }
   });
   document.getElementById("shoppingJump").addEventListener("click", function(){
+    forgetListUnlock();
     activeListId = "shopping";
     listItemInput.value = "";
     setView("lists");
@@ -1155,6 +1209,7 @@
   document.getElementById("newList").addEventListener("click", function(){
     var name = window.prompt("List name");
     if(name && name.trim()) saveListChange("", "POST", {name:name}, function(result){
+      forgetListUnlock();
       activeListId = result.id;
       listItemInput.value = "";
     });
@@ -1171,7 +1226,62 @@
   document.getElementById("clearListItems").addEventListener("click", function(){
     if(window.confirm("Clear all checked items?")) saveListChange("/" + activeListId + "/items", "DELETE");
   });
+  document.getElementById("listLockButton").addEventListener("click", function(){
+    if(listUnlockToken){
+      forgetListUnlock();
+      return;
+    }
+    listPasswordForm.hidden = false;
+    document.getElementById("listNewPassword").focus();
+  });
+  document.getElementById("cancelListPassword").addEventListener("click", function(){
+    listPasswordForm.reset();
+    listPasswordForm.hidden = true;
+  });
+  listPasswordForm.addEventListener("submit", function(event){
+    event.preventDefault();
+    var password = document.getElementById("listNewPassword").value;
+    if(password !== document.getElementById("listConfirmPassword").value){
+      listStatus.textContent = "The passwords do not match.";
+      return;
+    }
+    var listId = activeListId;
+    saveListChange("/" + listId + "/lock", "POST", {password:password}, function(){
+      checklists = checklists.map(function(list){
+        return list.id === listId ? {id:list.id, locked:true} : list;
+      });
+      listItemInput.value = "";
+      forgetListUnlock();
+      renderLists();
+    });
+  });
+  listUnlockForm.addEventListener("submit", async function(event){
+    event.preventDefault();
+    if(listSaving) return;
+    var version = listPrivacyVersion;
+    listSaving = true;
+    listStatus.textContent = "Unlocking…";
+    try{
+      var password = document.getElementById("listUnlockPassword").value;
+      listUnlockForm.reset();
+      var result = await listApi("/" + activeListId + "/unlock", "POST", {password:password});
+      if(version !== listPrivacyVersion) return;
+      listUnlockToken = result.token;
+      listUnlockTimer = setTimeout(forgetListUnlock, Math.max(0, Number(result.token.split(".")[1]) - Date.now()));
+      await refreshLists();
+    }catch(error){
+      if(version === listPrivacyVersion) listStatus.textContent = error.message;
+    }finally{
+      listSaving = false;
+    }
+  });
+  document.getElementById("removeListPassword").addEventListener("click", function(){
+    if(window.confirm("Remove the password and make this list visible to everyone with Almanac access?"))
+      saveListChange("/" + activeListId + "/lock", "DELETE", undefined, forgetListUnlock);
+  });
+  window.addEventListener("pagehide", forgetListUnlock);
   document.addEventListener("visibilitychange", function(){
+    if(document.hidden && UI.view === "lists") forgetListUnlock();
     if(!document.hidden && !listSaving && (UI.view === "lists" || UI.view === "agenda"))
       refreshLists().catch(function(){});
   });
