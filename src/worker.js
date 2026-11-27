@@ -288,6 +288,11 @@ async function handleApi(request, env, url) {
   const id = segments[2];
   const { method } = request;
 
+  if (id && segments[3] === "invite") {
+    if (method !== "POST" || segments.length !== 4) return json({error:"Method not allowed"},405);
+    return sendCalendarInvite(request, env, url, id);
+  }
+
   if (method === "POST" && id && segments[3] === "occurrence") return changeOccurrence(request, env.DB, id);
 
   if (method === "GET" && !id) {
@@ -484,6 +489,10 @@ function gmailRedirect(url) {
   return gmailAllowedOrigin(url) + "/api/auth/google/callback";
 }
 const GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.readonly";
+const CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar.events.owned";
+const CALENDAR_COOKIE = "__Secure-almanac-calendar";
+const CALENDAR_SESSION_SECONDS = 30 * 24 * 60 * 60;
+const INVITE_TIME_ZONE = "Europe/Stockholm";
 const encoder = new TextEncoder();
 function b64url(bytes) {
   let binary = "";
@@ -506,6 +515,33 @@ async function encryptGmail(env, value) {
   const encrypted = await crypto.subtle.encrypt({name:"AES-GCM",iv}, await gmailKey(env), encoder.encode(value));
   return b64url(iv) + "." + b64url(new Uint8Array(encrypted));
 }
+async function decryptGoogleGrant(env, value) {
+  const [iv, ciphertext] = value.split(".");
+  const raw = await crypto.subtle.decrypt({name:"AES-GCM", iv:unb64url(iv)}, await gmailKey(env), unb64url(ciphertext));
+  return JSON.parse(new TextDecoder().decode(raw));
+}
+
+function requestCookie(request, name) {
+  const prefix = name + "=";
+  const value = (request.headers.get("cookie") || "").split(";").map(part => part.trim()).find(part => part.startsWith(prefix));
+  return value?.slice(prefix.length) || "";
+}
+
+async function calendarGrant(request, env) {
+  const value = requestCookie(request, CALENDAR_COOKIE);
+  if (!value) return null;
+  try {
+    const grant = await decryptGoogleGrant(env, value);
+    return grant.type === "calendar" && grant.expiresAt > Date.now() && grant.refresh_token ? grant : null;
+  } catch {
+    return null;
+  }
+}
+
+function calendarCookie(value, maxAge) {
+  return CALENDAR_COOKIE + "=" + value + "; Path=/api; HttpOnly; Secure; SameSite=Lax; Max-Age=" + maxAge;
+}
+
 async function ensureGmailTables(db) {
   await db.prepare("CREATE TABLE IF NOT EXISTS gmail_oauth_state (nonce TEXT PRIMARY KEY, expires_at INTEGER NOT NULL)").run();
   await db.prepare("CREATE TABLE IF NOT EXISTS gmail_connection (id INTEGER PRIMARY KEY CHECK (id=1), encrypted_token TEXT NOT NULL, connected_at INTEGER NOT NULL)").run();
@@ -524,15 +560,23 @@ async function handleGoogleAuth(request, env, url, action) {
     const record = await env.DB.prepare("SELECT connected_at FROM gmail_connection WHERE id=1").first();
     return json({configured:true,connected:!!record,connectedAt:record?.connected_at||null});
   }
-  if (!configured) return json({error:"Gmail credentials are not configured"},503);
-  if (action === "start" && request.method === "GET") {
+  if (action === "calendar-status" && request.method === "GET")
+    return new Response(JSON.stringify({configured, connected:configured && !!await calendarGrant(request, env)}),
+      {headers:{"content-type":"application/json","cache-control":"no-store"}});
+  if (action === "calendar-disconnect" && request.method === "POST") {
+    if (request.headers.get("origin") !== url.origin) return json({error:"Invalid request origin"},403);
+    return new Response(null,{status:204,headers:{"set-cookie":calendarCookie("",0),"cache-control":"no-store"}});
+  }
+  if (!configured) return json({error:"Google credentials are not configured"},503);
+  if (["start","calendar-start"].includes(action) && request.method === "GET") {
+    const calendar = action === "calendar-start";
     // Temporary preview-only diagnostics: disclose only a fixed stage label,
     // never exception text, SQL parameters, OAuth state, tokens or secrets.
     let stage = "create_tables";
     try {
       await ensureGmailTables(env.DB);
       stage = "generate_state";
-      const nonce = b64url(crypto.getRandomValues(new Uint8Array(32)));
+      const nonce = (calendar ? "calendar." : "") + b64url(crypto.getRandomValues(new Uint8Array(32)));
       stage = "remove_expired_state";
       await env.DB.prepare("DELETE FROM gmail_oauth_state WHERE expires_at<?").bind(Date.now()).run();
       stage = "save_state";
@@ -540,7 +584,7 @@ async function handleGoogleAuth(request, env, url, action) {
       stage = "build_redirect";
       const params = new URLSearchParams({
         client_id:env.GMAIL_CLIENT_ID,redirect_uri:gmailRedirect(url),response_type:"code",
-        scope:GMAIL_SCOPE,access_type:"offline",prompt:"consent",state:nonce
+        scope:calendar ? CALENDAR_SCOPE : GMAIL_SCOPE,access_type:"offline",prompt:calendar ? "consent select_account" : "consent",state:nonce
       });
       return new Response(null,{status:302,headers:{
         "location":"https://accounts.google.com/o/oauth2/v2/auth?"+params,
@@ -560,9 +604,8 @@ async function handleGoogleAuth(request, env, url, action) {
     const cookie=(request.headers.get("cookie")||"").split(";").map(v=>v.trim()).find(v=>v.startsWith("almanac_gmail_state="));
     if (!state || !cookie || cookie.slice("almanac_gmail_state=".length)!==state) return fail("The sign-in session expired or did not match. Please try again.");
     await ensureGmailTables(env.DB);
-    const saved=await env.DB.prepare("SELECT expires_at FROM gmail_oauth_state WHERE nonce=?").bind(state).first();
-    if (!saved || saved.expires_at<Date.now()) return fail("The sign-in session expired. Please try again.");
-    await env.DB.prepare("DELETE FROM gmail_oauth_state WHERE nonce=?").bind(state).run();
+    const saved=await env.DB.prepare("DELETE FROM gmail_oauth_state WHERE nonce=? AND expires_at>=? RETURNING nonce").bind(state,Date.now()).first();
+    if (!saved) return fail("The sign-in session expired. Please try again.");
     const code=url.searchParams.get("code");
     if (!code) return fail("Google did not return an authorisation code.");
     const tokenResponse=await fetch("https://oauth2.googleapis.com/token",{
@@ -572,6 +615,18 @@ async function handleGoogleAuth(request, env, url, action) {
     if (!tokenResponse.ok) return fail("Google could not complete the connection. Check the OAuth configuration.");
     const token=await tokenResponse.json();
     if (!token.refresh_token) return fail("Google did not provide an offline refresh token. Please retry the connection.");
+    if (state.startsWith("calendar.")) {
+      if (!(token.scope || "").split(/\s+/).includes(CALENDAR_SCOPE))
+        return fail("Allow Google Calendar access to enable invitations.");
+      const value = await encryptGmail(env, JSON.stringify({
+        type:"calendar", refresh_token:token.refresh_token, expiresAt:Date.now() + CALENDAR_SESSION_SECONDS * 1000
+      }));
+      if (value.length > 3800) return fail("The Google Calendar connection could not be saved in this browser.");
+      const response = gmailHtml("Google Calendar connected for invitations in this browser.", true);
+      response.headers.append("set-cookie", clearCookie);
+      response.headers.append("set-cookie", calendarCookie(value, CALENDAR_SESSION_SECONDS));
+      return response;
+    }
     const encrypted=await encryptGmail(env,JSON.stringify({refresh_token:token.refresh_token,scope:token.scope||"",token_type:token.token_type||""}));
     await env.DB.prepare("INSERT INTO gmail_connection (id,encrypted_token,connected_at) VALUES (1,?,?) ON CONFLICT(id) DO UPDATE SET encrypted_token=excluded.encrypted_token,connected_at=excluded.connected_at").bind(encrypted,Date.now()).run();
     const response=gmailHtml("Gmail connected with read-only permission. No messages have been imported.",true);
@@ -588,6 +643,83 @@ async function handleGoogleAuth(request, env, url, action) {
   return json({error:"Not found"},404);
 }
 
+
+function inviteDatePlus(date, days) {
+  const value = new Date(date + "T00:00:00Z");
+  value.setUTCDate(value.getUTCDate() + days);
+  return optionalDate(value.toISOString().slice(0, 10));
+}
+
+function inviteTime(value) {
+  return typeof value === "string" && /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
+}
+
+function calendarInviteDetails(row, input) {
+  const email = typeof input?.email === "string" ? input.email.trim() : "";
+  if (email.length > 254 || !/^[^\s@<>,;]+@[^\s@<>,;]+\.[^\s@<>,;]+$/.test(email))
+    throw new ValidationError("Enter one recipient email address");
+  const repeating = !!(row.repeat_frequency || row.recurring);
+  const date = repeating ? optionalDate(input.date) : row.date;
+  if (repeating && (!scheduledOccurrence(row,date) || JSON.parse(row.skipped_dates || "[]").includes(date)))
+    throw new ValidationError("Choose an available occurrence of this event");
+
+  const lastDay = row.end_date || date;
+  let start = {date};
+  let end = {date:inviteDatePlus(lastDay, 1)};
+  if (row.time) {
+    const endDate = optionalDate(input.endDate);
+    if (!inviteTime(row.time) || !inviteTime(input.endTime) || !endDate ||
+        endDate < lastDay || (endDate === date && input.endTime <= row.time))
+      throw new ValidationError("Choose an end date and time after the event starts");
+    start = {dateTime:date + "T" + row.time + ":00", timeZone:INVITE_TIME_ZONE};
+    end = {dateTime:endDate + "T" + input.endTime + ":00", timeZone:INVITE_TIME_ZONE};
+  }
+  return {
+    date, email,
+    event:{
+      summary:row.title.replace(/^\[(?:Walter|Ingalill) · School\] /, ""),
+      start, end, attendees:[{email}],
+      ...(input.includeNotes === true && row.notes ? {description:row.notes} : {})
+    }
+  };
+}
+
+async function sendCalendarInvite(request, env, url, id) {
+  if (!gmailAllowedOrigin(url) || request.headers.get("origin") !== url.origin)
+    return json({error:"Invitations must be sent from Almanac"},403);
+  const grant = await calendarGrant(request, env);
+  if (!grant) return json({error:"Connect Google Calendar in this browser first"},403);
+  const row = await env.DB.prepare("SELECT * FROM events WHERE id=?").bind(id).first();
+  if (!row) return json({error:"Event not found"},404);
+  const details = calendarInviteDetails(row, await request.json().catch(() => null));
+
+  const tokenResponse = await fetch("https://oauth2.googleapis.com/token",{
+    method:"POST", headers:{"content-type":"application/x-www-form-urlencoded"},
+    body:new URLSearchParams({client_id:env.GMAIL_CLIENT_ID,client_secret:env.GMAIL_CLIENT_SECRET,
+      refresh_token:grant.refresh_token,grant_type:"refresh_token"})
+  });
+  if (!tokenResponse.ok) return json({error:"Reconnect Google Calendar and try again"},403);
+  const {access_token} = await tokenResponse.json();
+  if (!access_token) return json({error:"Google Calendar did not return an access token"},502);
+
+  // Use a stable Google event ID so retries target the same invitation.
+  const digest = await crypto.subtle.digest("SHA-256", encoder.encode(JSON.stringify([id, details.date, details.email.toLowerCase()])));
+  const eventId = Array.from(new Uint8Array(digest), value => value.toString(16).padStart(2,"0")).join("");
+  const response = await fetch("https://www.googleapis.com/calendar/v3/calendars/primary/events?sendUpdates=all",{
+    method:"POST", headers:{authorization:"Bearer " + access_token,"content-type":"application/json"},
+    body:JSON.stringify({id:eventId,...details.event})
+  });
+  if (response.status === 409) return json({sent:false,alreadySent:true});
+  if (response.status === 403) {
+    const result = await response.json().catch(() => null);
+    const disabled = result?.error?.errors?.some(error => ["accessNotConfigured","serviceDisabled"].includes(error.reason)) ||
+      result?.error?.details?.some(detail => detail.reason === "SERVICE_DISABLED");
+    if (disabled) return json({error:"Enable the Google Calendar API in the Google Cloud project used by Almanac"},503);
+    return json({error:"Google denied the invite. Check your Calendar permissions or reconnect Google Calendar."},403);
+  }
+  if (!response.ok) return json({error:"Google Calendar could not confirm the invite. You can retry."},502);
+  return json({sent:true},201);
+}
 
 const stockholmHour = new Intl.DateTimeFormat("en-GB", {
   timeZone: "Europe/Stockholm", hour: "2-digit", hourCycle: "h23"
@@ -607,9 +739,7 @@ async function seenGmailMessages(db, table, messages) {
 async function gmailAccessToken(env) {
   const row=await env.DB.prepare("SELECT encrypted_token FROM gmail_connection WHERE id=1").first();
   if (!row) throw new ValidationError("Connect Gmail first");
-  const [iv, ciphertext]=row.encrypted_token.split(".");
-  const raw=await crypto.subtle.decrypt({name:"AES-GCM",iv:unb64url(iv)},await gmailKey(env),unb64url(ciphertext));
-  const saved=JSON.parse(new TextDecoder().decode(raw));
+  const saved = await decryptGoogleGrant(env, row.encrypted_token);
   const response=await fetch("https://oauth2.googleapis.com/token",{method:"POST",
     headers:{"content-type":"application/x-www-form-urlencoded"},
     body:new URLSearchParams({client_id:env.GMAIL_CLIENT_ID,client_secret:env.GMAIL_CLIENT_SECRET,
