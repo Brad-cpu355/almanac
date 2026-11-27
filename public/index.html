@@ -604,6 +604,15 @@
             <button type="submit" class="btn btn-primary">Set password and lock</button>
             <button type="button" class="btn btn-ghost" id="cancelListPassword">Cancel</button>
           </form>
+          <details class="field" id="listShare">
+            <summary>Share list</summary>
+            <label><input type="checkbox" id="includeCompletedInShare"> Include completed items</label>
+            <textarea id="listSharePreview" rows="5" readonly aria-label="List text to share"></textarea>
+            <div class="panel-actions">
+              <button type="button" class="btn btn-primary" id="sendListShare" hidden>Share via…</button>
+              <button type="button" class="btn btn-ghost" id="copyListShare">Copy list</button>
+            </div>
+          </details>
           <div class="list-actions">
             <button type="button" class="btn btn-ghost" id="listLockButton">Lock list</button>
             <button type="button" class="btn btn-ghost" id="removeListPassword" hidden>Remove password</button>
@@ -1050,11 +1059,19 @@
   var listPrivacyVersion = 0;
   var listUnlockForm = document.getElementById("listUnlockForm");
   var listPasswordForm = document.getElementById("listPasswordForm");
+  var listShare = document.getElementById("listShare");
+  var listSharePreview = document.getElementById("listSharePreview");
+  var includeCompletedInShare = document.getElementById("includeCompletedInShare");
+  var sendListShare = document.getElementById("sendListShare");
+  var copyListShare = document.getElementById("copyListShare");
 
   function forgetListUnlock(){
     ++listPrivacyVersion;
     ++listRequest;
     clearTimeout(listUnlockTimer);
+    listShare.open = false;
+    includeCompletedInShare.checked = false;
+    refreshListShare();
     listUnlockForm.reset();
     listPasswordForm.reset();
     listPasswordForm.hidden = true;
@@ -1098,6 +1115,32 @@
     }
   }
 
+  function listShareText(list, includeCompleted){
+    var pending = list.items.filter(function(item){ return !item.checked; });
+    var completed = includeCompleted ? list.items.filter(function(item){ return item.checked; }) : [];
+    var lines = [list.name, ""];
+    pending.forEach(function(item){ lines.push("• " + item.label); });
+    if(completed.length){
+      if(pending.length) lines.push("");
+      lines.push("Completed");
+      completed.forEach(function(item){ lines.push("✓ " + item.label); });
+    }
+    if(!pending.length && !completed.length) lines.push("No unchecked items");
+    return lines.join("\n");
+  }
+
+  function refreshListShare(){
+    var list = checklists.find(function(list){ return list.id === activeListId; });
+    listSharePreview.value = listShare.open && list && (!list.locked || list.unlocked)
+      ? listShareText(list, includeCompletedInShare.checked) : "";
+    sendListShare.disabled = copyListShare.disabled = !listSharePreview.value;
+  }
+
+  listShare.addEventListener("toggle", refreshListShare);
+  includeCompletedInShare.addEventListener("change", refreshListShare);
+  bindTextShare(listSharePreview, sendListShare, copyListShare,
+    "List copied", "List text selected. Copy it to share.");
+
   function renderLists(){
     var shopping = checklists.find(function(list){ return list.id === "shopping"; });
     var jump = document.getElementById("shoppingJump");
@@ -1108,8 +1151,13 @@
     var needsPassword = selected?.locked && !selected.unlocked;
     document.getElementById("listContents").hidden = !selected || needsPassword;
     listUnlockForm.hidden = !needsPassword;
-    if(!selected) return;
+    if(!selected || needsPassword) listShare.open = false;
+    if(!selected) {
+      refreshListShare();
+      return;
+    }
     activeListId = selected.id;
+    refreshListShare();
     var picker = document.getElementById("listPicker");
     picker.replaceChildren();
     checklists.forEach(function(list){
@@ -2438,7 +2486,6 @@
   var shareEventNotes = document.getElementById("shareEventNotes");
   var shareEventPreview = document.getElementById("shareEventPreview");
   var sendEventShare = document.getElementById("sendEventShare");
-  sendEventShare.hidden = typeof navigator.share !== "function";
 
   function eventShareText(event, occurrenceDate, includeNotes){
     var format = new Intl.DateTimeFormat(undefined, {
@@ -2459,25 +2506,34 @@
   }
 
   shareEventNotes.addEventListener("change", refreshEventShare);
-  function selectEventShare(){
-    shareEventPreview.focus();
-    shareEventPreview.select();
-    shareEventPreview.setSelectionRange(0, shareEventPreview.value.length);
-    showToast("Event text selected. Copy it to share.");
-  }
-  document.getElementById("copyEventShare").addEventListener("click", async function(){
-    try{
-      await navigator.clipboard.writeText(shareEventPreview.value);
-      showToast("Event details copied");
-    }catch(error){selectEventShare();}
-  });
-  sendEventShare.addEventListener("click", async function(){
-    try{
-      await navigator.share({text:shareEventPreview.value});
-    }catch(error){
-      if(error.name !== "AbortError") selectEventShare();
+  function bindTextShare(preview, shareButton, copyButton, copiedMessage, selectionMessage){
+    shareButton.hidden = typeof navigator.share !== "function";
+    function selectText(){
+      if(!preview.value) return;
+      preview.focus();
+      preview.select();
+      preview.setSelectionRange(0, preview.value.length);
+      showToast(selectionMessage);
     }
-  });
+    copyButton.addEventListener("click", async function(){
+      if(!preview.value) return;
+      try{
+        await navigator.clipboard.writeText(preview.value);
+        showToast(copiedMessage);
+      }catch(error){selectText();}
+    });
+    shareButton.addEventListener("click", async function(){
+      if(!preview.value) return;
+      try{
+        await navigator.share({text:preview.value});
+      }catch(error){
+        if(error.name !== "AbortError") selectText();
+      }
+    });
+  }
+
+  bindTextShare(shareEventPreview, sendEventShare, document.getElementById("copyEventShare"),
+    "Event details copied", "Event text selected. Copy it to share.");
 
   var duplicateEvent = document.getElementById("eventDuplicate");
   var editOccurrence = document.getElementById("eventEditOccurrence");
