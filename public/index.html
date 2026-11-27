@@ -192,6 +192,9 @@
   .astro-good{color:#17613c}
   .astro-marginal{color:#795100}
   .astro-avoid{color:#9a2730}
+  .day-cell.astro-day-good{background:#e3f5e8}
+  .day-cell.astro-day-marginal{background:#fff4ce}
+  .day-cell.astro-day-avoid{background:#fbe4e6}
   .astro-day-mark{font-size:.58rem;line-height:1}
   .filter-bar{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin:0 0 16px;}
   .filter-label{font-size:.72rem;color:var(--ink-faint);font-weight:600;margin-right:3px;}
@@ -1937,6 +1940,7 @@
       cell.innerHTML = '<span>' + day + '</span><span class="day-dots" aria-hidden="true">' + dots + '</span>';
       var astroRating = astroRatings.get(key);
       if(astroRating){
+        cell.classList.add("astro-day-" + astroRating.toLowerCase());
         var mark = document.createElement("span");
         mark.className = "astro-day-mark astro-" + astroRating.toLowerCase();
         mark.textContent = "✦";
