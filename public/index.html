@@ -738,6 +738,29 @@
           <button type="button" class="btn btn-ghost" id="copyEventShare">Copy event details</button>
         </div>
       </details>
+      <details class="field" id="calendarInvite" hidden>
+        <summary>Send calendar invite</summary>
+        <p class="hint" id="calendarInviteContext"></p>
+        <p class="hint" id="calendarInviteStatus" role="status"></p>
+        <a class="btn btn-ghost" id="connectCalendarInvite" href="/api/auth/google/calendar-start" hidden>Connect Google Calendar</a>
+        <div id="calendarInviteFields" hidden>
+          <div class="field">
+            <label for="calendarInviteEmail">Recipient email</label>
+            <input type="email" id="calendarInviteEmail" form="calendarInviteInputs" maxlength="254" autocomplete="off" placeholder="name@example.com">
+          </div>
+          <div class="field" id="calendarInviteEnd" hidden>
+            <label for="calendarInviteEndDate">End date</label>
+            <input type="date" id="calendarInviteEndDate" form="calendarInviteInputs">
+            <label for="calendarInviteEndTime">End time (Sweden)</label>
+            <input type="time" id="calendarInviteEndTime" form="calendarInviteInputs">
+          </div>
+          <label><input type="checkbox" id="includeCalendarInviteNotes" form="calendarInviteInputs"> Include notes</label>
+          <div class="panel-actions">
+            <button type="button" class="btn btn-primary" id="sendCalendarInvite">Send invite</button>
+            <button type="button" class="btn btn-ghost" id="disconnectCalendarInvite">Disconnect Calendar</button>
+          </div>
+        </div>
+      </details>
       <div class="panel-actions">
         <button type="button" class="btn btn-ghost" id="eventDuplicate" hidden>Duplicate event</button>
         <button type="button" class="btn btn-ghost" id="eventEditOccurrence" hidden>Edit this occurrence</button>
@@ -749,6 +772,7 @@
   </div>
 </div>
 
+<form id="calendarInviteInputs" hidden></form>
 <div class="toast" id="toast"></div>
 
 <script>
@@ -2535,6 +2559,114 @@
   bindTextShare(shareEventPreview, sendEventShare, document.getElementById("copyEventShare"),
     "Event details copied", "Event text selected. Copy it to share.");
 
+  var calendarInvite = document.getElementById("calendarInvite");
+  var calendarInviteStatus = document.getElementById("calendarInviteStatus");
+  var calendarInviteContext = document.getElementById("calendarInviteContext");
+  var calendarInviteFields = document.getElementById("calendarInviteFields");
+  var connectCalendarInvite = document.getElementById("connectCalendarInvite");
+  var calendarInviteEmail = document.getElementById("calendarInviteEmail");
+  var calendarInviteEndDate = document.getElementById("calendarInviteEndDate");
+  var calendarInviteEndTime = document.getElementById("calendarInviteEndTime");
+  var includeCalendarInviteNotes = document.getElementById("includeCalendarInviteNotes");
+  var sendCalendarInvite = document.getElementById("sendCalendarInvite");
+  var disconnectCalendarInvite = document.getElementById("disconnectCalendarInvite");
+
+  function calendarInviteDate(context){
+    if(!repeatMode(context.event)) return context.event.date;
+    var next = nextOccurrence(context.event, todayDate());
+    return context.date || (next ? dateToStr(next) : "");
+  }
+
+  async function showCalendarInviteConnection(){
+    var context = eventContext;
+    calendarInviteFields.hidden = connectCalendarInvite.hidden = true;
+    try{
+      var response = await fetch("/api/auth/google/calendar-status", {cache:"no-store"});
+      if(!response.ok) throw new Error();
+      var status = await response.json();
+      if(context !== eventContext || !calendarInvite.open) return;
+      connectCalendarInvite.hidden = !status.configured || status.connected;
+      calendarInviteFields.hidden = !status.connected;
+      calendarInviteStatus.textContent = status.connected ? "Sending creates a copy in your connected Google Calendar."
+        : status.configured ? "Choose your Google account and allow Calendar access in this browser."
+        : "Google Calendar is unavailable on this deployment.";
+    }catch(error){
+      if(context === eventContext && calendarInvite.open)
+        calendarInviteStatus.textContent = "Could not check the Calendar connection.";
+    }
+  }
+
+  document.getElementById("calendarInviteInputs").addEventListener("submit", function(event){ event.preventDefault(); });
+  calendarInvite.addEventListener("toggle", function(){
+    if(calendarInvite.open && eventContext?.mode === "edit") showCalendarInviteConnection();
+  });
+  disconnectCalendarInvite.addEventListener("click", async function(){
+    try{
+      var response = await fetch("/api/auth/google/calendar-disconnect", {method:"POST"});
+      if(!response.ok) throw new Error();
+      await showCalendarInviteConnection();
+    }catch(error){
+      calendarInviteStatus.textContent = "Could not disconnect Google Calendar.";
+    }
+  });
+  sendCalendarInvite.addEventListener("click", async function(){
+    var context = eventContext;
+    if(context?.mode !== "edit" || calendarInviteFields.hidden || sendCalendarInvite.disabled) return;
+    var email = calendarInviteEmail.value.trim();
+    if(!email || !calendarInviteEmail.reportValidity()){
+      calendarInviteStatus.textContent = "Enter the recipient’s email address.";
+      calendarInviteEmail.focus();
+      return;
+    }
+    var date = calendarInviteDate(context);
+    if(!date) return;
+    if(context.event.time && (!calendarInviteEndDate.value || !calendarInviteEndTime.value ||
+       calendarInviteEndDate.value < (context.event.endDate || date) ||
+       (calendarInviteEndDate.value === date && calendarInviteEndTime.value <= context.event.time))){
+      calendarInviteStatus.textContent = "Choose an end date and time after the event starts.";
+      return;
+    }
+    sendCalendarInvite.disabled = true;
+    calendarInviteStatus.textContent = "Sending invite…";
+    try{
+      var response = await fetch("/api/events/" + encodeURIComponent(context.event.id) + "/invite", {
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({email,date,endDate:calendarInviteEndDate.value,endTime:calendarInviteEndTime.value,
+          includeNotes:includeCalendarInviteNotes.checked})
+      });
+      var result = await safeJson(response);
+      if(!response.ok || (!result.sent && !result.alreadySent)) throw new Error(result.error || "Could not send the invite.");
+      if(context === eventContext) calendarInviteStatus.textContent = result.alreadySent
+        ? "An invite for this date and address already exists in Google Calendar." : "Calendar invite sent to " + email + ".";
+    }catch(error){
+      if(context === eventContext) calendarInviteStatus.textContent = error.message;
+    }finally{
+      sendCalendarInvite.disabled = false;
+    }
+  });
+
+  function resetCalendarInvite(context){
+    var date = context.mode === "edit" ? calendarInviteDate(context) : "";
+    calendarInvite.hidden = !date;
+    calendarInvite.open = false;
+    calendarInviteFields.hidden = connectCalendarInvite.hidden = true;
+    calendarInviteStatus.textContent = "";
+    if(!date) return;
+    var event = context.event;
+    calendarInviteEmail.value = "";
+    includeCalendarInviteNotes.checked = false;
+    includeCalendarInviteNotes.parentElement.hidden = !event.notes;
+    calendarInviteContext.textContent = "Saved event · " + eventShareText(event, date, false).replace("\n"," · ");
+    document.getElementById("calendarInviteEnd").hidden = !event.time;
+    if(event.time){
+      var end = new Date((event.endDate || date) + "T" + event.time + ":00Z");
+      end.setUTCHours(end.getUTCHours() + 1);
+      calendarInviteEndDate.min = event.endDate || date;
+      calendarInviteEndDate.value = end.toISOString().slice(0,10);
+      calendarInviteEndTime.value = end.toISOString().slice(11,16);
+    }
+  }
+
   var duplicateEvent = document.getElementById("eventDuplicate");
   var editOccurrence = document.getElementById("eventEditOccurrence");
   var skipOccurrence = document.getElementById("eventSkipOccurrence");
@@ -2571,6 +2703,7 @@
     editingId = null;
     el.errTitle.classList.remove("show");
     el.eventForm.reset();
+    resetCalendarInvite(opts);
     selectedCategory = "personal";
     selectedSchool = Object.prototype.hasOwnProperty.call(opts, "school") ? opts.school : (UI.view !== "school" && (UI.filter === "walter" || UI.filter === "ingalill") ? UI.filter : "");
 
@@ -2617,7 +2750,7 @@
     el.eventOverlay.hidden = false;
     setTimeout(function(){ el.fTitle.focus(); }, 30);
   }
-  function closeEventModal(){ el.eventOverlay.hidden = true; editingId = null; }
+  function closeEventModal(){ el.eventOverlay.hidden = true; calendarInvite.open = false; editingId = null; }
   el.eventClose.addEventListener("click", closeEventModal);
   el.eventOverlay.addEventListener("click", function(e){ if(e.target === el.eventOverlay) closeEventModal(); });
 
