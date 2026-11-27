@@ -106,6 +106,11 @@ async function ensureLists(db) {
       id TEXT PRIMARY KEY, list_id TEXT NOT NULL REFERENCES checklists(id) ON DELETE CASCADE,
       label TEXT NOT NULL, checked INTEGER NOT NULL DEFAULT 0
     )`),
+    db.prepare(`CREATE TABLE IF NOT EXISTS checklist_locks (
+      list_id TEXT PRIMARY KEY REFERENCES checklists(id) ON DELETE CASCADE,
+      salt TEXT NOT NULL, verifier TEXT NOT NULL,
+      attempts INTEGER NOT NULL DEFAULT 0, window_start INTEGER NOT NULL DEFAULT 0
+    )`),
     db.prepare("CREATE INDEX IF NOT EXISTS checklist_items_list ON checklist_items(list_id)"),
     db.prepare("INSERT OR IGNORE INTO checklists (id, name) VALUES ('shopping', 'Shopping')")
   ]);
@@ -117,43 +122,128 @@ function listText(value, limit, label) {
   return value.trim();
 }
 
+const LIST_UNLOCK_TTL = 15 * 60 * 1000;
+
+async function listPasswordVerifier(password, salt) {
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveBits"]);
+  const bits = await crypto.subtle.deriveBits(
+    {name:"PBKDF2", hash:"SHA-256", salt:unb64url(salt), iterations:100000}, key, 256);
+  return b64url(new Uint8Array(bits));
+}
+
+async function listUnlockKey(verifier) {
+  return crypto.subtle.importKey("raw", unb64url(verifier), {name:"HMAC", hash:"SHA-256"}, false, ["sign","verify"]);
+}
+
+async function listAccess(request, db, listId) {
+  const [id, expires, signature, ...extra] = (request.headers.get("X-List-Unlock") || "").split(".");
+  if (extra.length || !/^[a-z0-9-]{1,40}$/.test(id) || (listId && id !== listId) ||
+      !/^\d{13}$/.test(expires) || Number(expires) <= Date.now() || !/^[A-Za-z0-9_-]{43}$/.test(signature || "")) return null;
+  const lock = await db.prepare("SELECT verifier FROM checklist_locks WHERE list_id=?").bind(id).first();
+  if (!lock) return null;
+  const valid = await crypto.subtle.verify("HMAC", await listUnlockKey(lock.verifier), unb64url(signature),
+    new TextEncoder().encode(id + "." + expires));
+  return valid ? {id, verifier:lock.verifier} : null;
+}
+
+async function unlockChecklist(request, db, listId) {
+  const input = await request.json().catch(() => null);
+  if (typeof input?.password !== "string" || !input.password.length || input.password.length > 128)
+    return listResponse({error:"Enter the list password"}, 400);
+  const now = Date.now();
+  const cutoff = now - LIST_UNLOCK_TTL;
+  const lock = await db.prepare(`UPDATE checklist_locks SET
+    attempts=CASE WHEN window_start<=? THEN 1 ELSE attempts+1 END,
+    window_start=CASE WHEN window_start<=? THEN ? ELSE window_start END
+    WHERE list_id=? AND (window_start<=? OR attempts<8) RETURNING salt, verifier`)
+    .bind(cutoff, cutoff, now, listId, cutoff).first();
+  if (!lock) return listResponse({error:"Unlock unavailable. Try again in 15 minutes or reload the list."}, 429);
+  const candidate = await listPasswordVerifier(input.password, lock.salt);
+  const payload = listId + "." + (now + LIST_UNLOCK_TTL);
+  const message = new TextEncoder().encode(payload);
+  const signature = await crypto.subtle.sign("HMAC", await listUnlockKey(candidate), message);
+  if (!await crypto.subtle.verify("HMAC", await listUnlockKey(lock.verifier), signature, message))
+    return listResponse({error:"Incorrect password"}, 403);
+  await db.prepare("UPDATE checklist_locks SET attempts=0 WHERE list_id=? AND verifier=?")
+    .bind(listId, lock.verifier).run();
+  return listResponse({token:payload + "." + b64url(new Uint8Array(signature))});
+}
+
+function listResponse(data, status = 200) {
+  const response = json(data, status);
+  response.headers.set("Cache-Control", "no-store");
+  return response;
+}
+
 async function handleLists(request, db, url, [listId, section, itemId, ...extra]) {
   const method = request.method;
   if (method !== "GET" && request.headers.get("origin") !== url.origin)
-    return json({error:"Invalid request origin"}, 403);
-  if (extra.length) return json({error:"Not found"}, 404);
+    return listResponse({error:"Invalid request origin"}, 403);
+  if (extra.length) return listResponse({error:"Not found"}, 404);
 
   await ensureLists(db);
+  if (listId && section === "unlock" && !itemId && method === "POST")
+    return unlockChecklist(request, db, listId);
+  const access = await listAccess(request, db, listId);
   if (!listId && method === "GET") {
-    const {results} = await db.prepare(`SELECT l.id, l.name, i.id AS item_id, i.label, i.checked
-      FROM checklists l LEFT JOIN checklist_items i ON i.list_id = l.id
-      ORDER BY l.id <> 'shopping', l.name COLLATE NOCASE, l.id, i.rowid`).all();
+    const {results} = await db.prepare(`SELECT l.id, p.list_id IS NOT NULL AS locked,
+      CASE WHEN p.list_id IS NULL OR (p.list_id=? AND p.verifier=?) THEN l.name END AS name,
+      i.id AS item_id, i.label, i.checked
+      FROM checklists l LEFT JOIN checklist_locks p ON p.list_id=l.id
+      LEFT JOIN checklist_items i ON i.list_id=l.id AND (p.list_id IS NULL OR (p.list_id=? AND p.verifier=?))
+      ORDER BY l.id <> 'shopping', name COLLATE NOCASE, l.id, i.rowid`)
+      .bind(access?.id || "", access?.verifier || "", access?.id || "", access?.verifier || "").all();
     const lists = new Map();
     for (const row of results) {
-      if (!lists.has(row.id)) lists.set(row.id, {id:row.id, name:row.name, items:[]});
+      if (!lists.has(row.id)) lists.set(row.id, row.name === null
+        ? {id:row.id, name:"Private list", items:[], locked:true}
+        : {id:row.id, name:row.name, items:[], locked:!!row.locked, unlocked:!!row.locked});
       if (row.item_id) lists.get(row.id).items.push({id:row.item_id, label:row.label, checked:!!row.checked});
     }
-    return json([...lists.values()]);
+    return listResponse([...lists.values()]);
   }
   if (!listId && method === "POST") {
     const input = await request.json().catch(() => null);
     const name = listText(input?.name, 80, "List name");
     const id = crypto.randomUUID();
     await db.prepare("INSERT INTO checklists (id, name) VALUES (?, ?)").bind(id, name).run();
-    return json({id}, 201);
+    return listResponse({id}, 201);
   }
 
+  if (!listId) return listResponse({error:"Not found"}, 404);
+  const lock = await db.prepare("SELECT verifier FROM checklist_locks WHERE list_id=?").bind(listId).first();
+  if (lock && access?.verifier !== lock.verifier) return listResponse({error:"Unlock this list first"}, 403);
+
+  if (section === "lock" && !itemId && method === "POST") {
+    if (lock) return listResponse({error:"This list already has a password"}, 409);
+    const input = await request.json().catch(() => null);
+    if (typeof input?.password !== "string" || input.password.length < 8 || input.password.length > 128 || !input.password.trim())
+      return listResponse({error:"Use a password between 8 and 128 characters"}, 400);
+    const salt = b64url(crypto.getRandomValues(new Uint8Array(16)));
+    const verifier = await listPasswordVerifier(input.password, salt);
+    const result = await db.prepare(`INSERT OR IGNORE INTO checklist_locks (list_id, salt, verifier)
+      SELECT id, ?, ? FROM checklists WHERE id=?`).bind(salt, verifier, listId).run();
+    return result.meta.changes ? listResponse({ok:true}) : listResponse({error:"Could not lock this list"}, 409);
+  }
+  if (section === "lock" && !itemId && method === "DELETE" && lock) {
+    await db.prepare("DELETE FROM checklist_locks WHERE list_id=? AND verifier=?").bind(listId, access.verifier).run();
+    return listResponse({ok:true});
+  }
+
+  // Check the lock again in each write in case another device just changed it.
+  const lockGuard = "COALESCE((SELECT verifier FROM checklist_locks WHERE list_id=?), '')=?";
+  const lockArgs = [listId, access?.verifier || ""];
   if (!section && method === "PATCH") {
     const input = await request.json().catch(() => null);
     const name = listText(input?.name, 80, "List name");
-    const result = await db.prepare("UPDATE checklists SET name=? WHERE id=?").bind(name, listId).run();
-    return result.meta.changes ? json({ok:true}) : json({error:"List not found"}, 404);
+    const result = await db.prepare("UPDATE checklists SET name=? WHERE id=? AND " + lockGuard).bind(name, listId, ...lockArgs).run();
+    return result.meta.changes ? listResponse({ok:true}) : listResponse({error:"List not found"}, 404);
   }
   if (!section && method === "DELETE" && listId !== "shopping") {
-    await db.prepare("DELETE FROM checklists WHERE id=?").bind(listId).run();
-    return json({ok:true});
+    await db.prepare("DELETE FROM checklists WHERE id=? AND " + lockGuard).bind(listId, ...lockArgs).run();
+    return listResponse({ok:true});
   }
-  if (section !== "items") return json({error:"Not found"}, 404);
+  if (section !== "items") return listResponse({error:"Not found"}, 404);
 
   if (!itemId && method === "POST") {
     const input = await request.json().catch(() => null);
@@ -162,25 +252,25 @@ async function handleLists(request, db, url, [listId, section, itemId, ...extra]
     const labels = input.items.map(label => listText(label, 200, "Item"));
     const result = await db.batch(labels.map(label =>
       db.prepare(`INSERT INTO checklist_items (id, list_id, label)
-        SELECT ?, id, ? FROM checklists WHERE id=?`).bind(crypto.randomUUID(), label, listId)));
-    return result[0].meta.changes ? json({ok:true}, 201) : json({error:"List not found"}, 404);
+        SELECT ?, id, ? FROM checklists WHERE id=? AND ${lockGuard}`).bind(crypto.randomUUID(), label, listId, ...lockArgs)));
+    return result[0].meta.changes ? listResponse({ok:true}, 201) : listResponse({error:"List not found"}, 404);
   }
   if (!itemId && method === "DELETE") {
-    await db.prepare("DELETE FROM checklist_items WHERE list_id=? AND checked=1").bind(listId).run();
-    return json({ok:true});
+    await db.prepare("DELETE FROM checklist_items WHERE list_id=? AND checked=1 AND " + lockGuard).bind(listId, ...lockArgs).run();
+    return listResponse({ok:true});
   }
   if (itemId && method === "PATCH") {
     const input = await request.json().catch(() => null);
     if (typeof input?.checked !== "boolean") throw new ValidationError("Choose whether the item is checked");
-    const result = await db.prepare("UPDATE checklist_items SET checked=? WHERE list_id=? AND id=?")
-      .bind(Number(input.checked), listId, itemId).run();
-    return result.meta.changes ? json({ok:true}) : json({error:"Item not found"}, 404);
+    const result = await db.prepare("UPDATE checklist_items SET checked=? WHERE list_id=? AND id=? AND " + lockGuard)
+      .bind(Number(input.checked), listId, itemId, ...lockArgs).run();
+    return result.meta.changes ? listResponse({ok:true}) : listResponse({error:"Item not found"}, 404);
   }
   if (itemId && method === "DELETE") {
-    await db.prepare("DELETE FROM checklist_items WHERE list_id=? AND id=?").bind(listId, itemId).run();
-    return json({ok:true});
+    await db.prepare("DELETE FROM checklist_items WHERE list_id=? AND id=? AND " + lockGuard).bind(listId, itemId, ...lockArgs).run();
+    return listResponse({ok:true});
   }
-  return json({error:"Not found"}, 404);
+  return listResponse({error:"Not found"}, 404);
 }
 
 async function handleApi(request, env, url) {
