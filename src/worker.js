@@ -17,6 +17,11 @@ const CATEGORIES = new Set(["personal", "work", "family", "school", "lotta", "bi
 class ValidationError extends Error {}
 
 export default {
+  async scheduled(event, env) {
+    if (stockholmHour.format(event.scheduledTime) !== "18") return;
+    const scans = await Promise.allSettled([scanSchoolGmail(env, 20), scanPersonalGmail(env, 20)]);
+    if (scans.some(scan => scan.status === "rejected")) throw new Error("A scheduled Gmail scan failed");
+  },
   async fetch(request, env) {
     const url = new URL(request.url);
     if (url.pathname.startsWith("/api/")) {
@@ -406,7 +411,19 @@ async function handleGoogleAuth(request, env, url, action) {
 }
 
 
-/* Manual Gmail scan for approved deployment hosts. Never import without explicit approval.
+const stockholmHour = new Intl.DateTimeFormat("en-GB", {
+  timeZone: "Europe/Stockholm", hour: "2-digit", hourCycle: "h23"
+});
+
+async function seenGmailMessages(db, table, messages) {
+  if (!messages.length) return new Set();
+  const placeholders = messages.map(() => "?").join(",");
+  const {results} = await db.prepare(`SELECT message_id FROM ${table} WHERE message_id IN (${placeholders})`)
+    .bind(...messages.map(message => message.id)).all();
+  return new Set(results.map(row => row.message_id));
+}
+
+/* Gmail scans for Almanac. Never import without explicit approval.
  * Store only selected message metadata, not full message bodies or tokens.
  */
 async function gmailAccessToken(env) {
@@ -541,39 +558,41 @@ function schoolEmailRow(row) {
     receivedAt:row.received_at,child:row.child,kind:row.kind,dueDate:row.due_date,
     status:row.review_status,proposed:suggestDateTime(row.subject,row.snippet,row.received_at)};
 }
+async function scanSchoolGmail(env, limit = 40) {
+  await ensureSchoolEmail(env.DB);
+  const token=await gmailAccessToken(env);
+  // Explicitly limit the query to school-service senders, not the full inbox.
+  const query=`newer_than:30d {from:(unikum.net) from:(malmo.se) from:(malmö.se) from:"${PRORENATA_SCHOOL_SENDER}"} -from:maria.rosenqvist@malmo.se`;
+  const list=await gmailRequest(token,"messages?"+new URLSearchParams({q:query,maxResults:String(limit)}));
+  const existing=await seenGmailMessages(env.DB, "school_email_suggestions", list.messages || []);
+  let added=0,skipped=0;
+  for(const item of list.messages||[]){
+    if(existing.has(item.id)){skipped++;continue;}
+    const message=await gmailRequest(token,"messages/"+encodeURIComponent(item.id)+"?format=metadata&metadataHeaders=Subject&metadataHeaders=From");
+    const headers=message.payload?.headers||[];
+    const subject=(headers.find(h=>h.name.toLowerCase()==="subject")?.value||"").slice(0,160);
+    const sender=(headers.find(h=>h.name.toLowerCase()==="from")?.value||"").slice(0,200);
+    const snippet=(message.snippet||"").slice(0,300);
+    if(sender.toLowerCase().includes("maria.rosenqvist@malmo.se")){skipped++;continue;}
+    const classified=classifySchoolEmail(subject,snippet);
+    if(!classified){skipped++;continue;}
+    await env.DB.prepare(`INSERT OR IGNORE INTO school_email_suggestions
+      (message_id,subject,sender,snippet,received_at,child,kind,due_date,created_at)
+      VALUES (?,?,?,?,?,?,?,?,?)`).bind(item.id,subject,sender,snippet,
+      Number(message.internalDate)||Date.now(),classified.child,classified.kind,"",Date.now()).run();
+    added++;
+  }
+  return {added,skipped,checked:(list.messages||[]).length};
+}
 async function handleSchoolEmail(request,env,url,action) {
   if(!gmailAllowedOrigin(url))return json({error:"Not available"},404);
   if(request.method!=="GET" && request.headers.get("origin")!==gmailAllowedOrigin(url))
     return json({error:"Invalid request origin"},403);
+  if(action==="scan" && request.method==="POST") return json(await scanSchoolGmail(env));
   await ensureSchoolEmail(env.DB);
   if(action==="suggestions" && request.method==="GET"){
     const {results}=await env.DB.prepare("SELECT * FROM school_email_suggestions ORDER BY received_at DESC LIMIT 100").all();
     return json(results.filter(r=>!r.sender.toLowerCase().includes("maria.rosenqvist@malmo.se")).map(schoolEmailRow));
-  }
-  if(action==="scan" && request.method==="POST"){
-    const token=await gmailAccessToken(env);
-    // Explicitly limit the query to school-service senders, not the full inbox.
-    const query=`newer_than:30d {from:(unikum.net) from:(malmo.se) from:(malmö.se) from:"${PRORENATA_SCHOOL_SENDER}"} -from:maria.rosenqvist@malmo.se`;
-    const list=await gmailRequest(token,"messages?"+new URLSearchParams({q:query,maxResults:"40"}));
-    let added=0,skipped=0;
-    for(const item of list.messages||[]){
-      const existing=await env.DB.prepare("SELECT message_id FROM school_email_suggestions WHERE message_id=?").bind(item.id).first();
-      if(existing){skipped++;continue;}
-      const message=await gmailRequest(token,"messages/"+encodeURIComponent(item.id)+"?format=metadata&metadataHeaders=Subject&metadataHeaders=From");
-      const headers=message.payload?.headers||[];
-      const subject=(headers.find(h=>h.name.toLowerCase()==="subject")?.value||"").slice(0,160);
-      const sender=(headers.find(h=>h.name.toLowerCase()==="from")?.value||"").slice(0,200);
-      const snippet=(message.snippet||"").slice(0,300);
-      if(sender.toLowerCase().includes("maria.rosenqvist@malmo.se")){skipped++;continue;}
-      const classified=classifySchoolEmail(subject,snippet);
-      if(!classified){skipped++;continue;}
-      await env.DB.prepare(`INSERT OR IGNORE INTO school_email_suggestions
-        (message_id,subject,sender,snippet,received_at,child,kind,due_date,created_at)
-        VALUES (?,?,?,?,?,?,?,?,?)`).bind(item.id,subject,sender,snippet,
-        Number(message.internalDate)||Date.now(),classified.child,classified.kind,"",Date.now()).run();
-      added++;
-    }
-    return json({added,skipped,checked:(list.messages||[]).length});
   }
   if(action==="actions" && request.method==="POST"){
     const input=await request.json();
@@ -814,36 +833,38 @@ async function ensurePersonalEmail(db){
     created_at INTEGER NOT NULL
   )`).run();
 }
+async function scanPersonalGmail(env, limit = 40) {
+  await ensurePersonalEmail(env.DB);
+  const rules=await personalSenderRules(env.DB);
+  if(!rules.length)return {added:0,skipped:0,checked:0,emptySenderList:true};
+  const token=await gmailAccessToken(env);
+  const query="newer_than:30d {"+rules.map(rule=>"from:"+rule).join(" ")+"}";
+  const list=await gmailRequest(token,"messages?"+new URLSearchParams({q:query,maxResults:String(limit)}));
+  const existing=await seenGmailMessages(env.DB, "personal_email_suggestions", list.messages || []);
+  let added=0,skipped=0;
+  for(const item of list.messages||[]){
+    if(existing.has(item.id)){skipped++;continue;}
+    const message=await gmailRequest(token,"messages/"+encodeURIComponent(item.id)+"?format=metadata&metadataHeaders=Subject&metadataHeaders=From");
+    const headers=message.payload?.headers||[];
+    const sender=headers.find(h=>h.name.toLowerCase()==="from")?.value||"";
+    if(!matchesPersonalSender(sender,rules)){skipped++;continue;}
+    const subject=(headers.find(h=>h.name.toLowerCase()==="subject")?.value||"(No subject)").slice(0,160);
+    await env.DB.prepare("INSERT OR IGNORE INTO personal_email_suggestions (message_id,subject,received_at,created_at) VALUES (?,?,?,?)")
+      .bind(item.id,subject,Number(message.internalDate)||Date.now(),Date.now()).run();
+    added++;
+  }
+  return {added,skipped,checked:(list.messages||[]).length};
+}
 async function handlePersonalEmail(request,env,url,action){
   if(!gmailAllowedOrigin(url))return json({error:"Not available"},404);
   if(request.method!=="GET" && request.headers.get("origin")!==gmailAllowedOrigin(url))
     return json({error:"Invalid request origin"},403);
   if(action==="senders")return handlePersonalSenders(request,env.DB);
+  if(action==="scan" && request.method==="POST") return json(await scanPersonalGmail(env));
   await ensurePersonalEmail(env.DB);
   if(action==="suggestions" && request.method==="GET"){
     const {results}=await env.DB.prepare("SELECT message_id,subject,received_at,review_status FROM personal_email_suggestions ORDER BY received_at DESC LIMIT 100").all();
     return json(results.map(r=>({id:r.message_id,subject:r.subject,receivedAt:r.received_at,status:r.review_status,proposed:suggestDateTime(r.subject,"",r.received_at)})));
-  }
-  if(action==="scan" && request.method==="POST"){
-    const rules=await personalSenderRules(env.DB);
-    if(!rules.length)return json({added:0,skipped:0,checked:0,emptySenderList:true});
-    const token=await gmailAccessToken(env);
-    const query="newer_than:30d {"+rules.map(rule=>"from:"+rule).join(" ")+"}";
-    const list=await gmailRequest(token,"messages?"+new URLSearchParams({q:query,maxResults:"40"}));
-    let added=0,skipped=0;
-    for(const item of list.messages||[]){
-      const existing=await env.DB.prepare("SELECT message_id FROM personal_email_suggestions WHERE message_id=?").bind(item.id).first();
-      if(existing){skipped++;continue;}
-      const message=await gmailRequest(token,"messages/"+encodeURIComponent(item.id)+"?format=metadata&metadataHeaders=Subject&metadataHeaders=From");
-      const headers=message.payload?.headers||[];
-      const sender=headers.find(h=>h.name.toLowerCase()==="from")?.value||"";
-      if(!matchesPersonalSender(sender,rules)){skipped++;continue;}
-      const subject=(headers.find(h=>h.name.toLowerCase()==="subject")?.value||"(No subject)").slice(0,160);
-      await env.DB.prepare("INSERT OR IGNORE INTO personal_email_suggestions (message_id,subject,received_at,created_at) VALUES (?,?,?,?)")
-        .bind(item.id,subject,Number(message.internalDate)||Date.now(),Date.now()).run();
-      added++;
-    }
-    return json({added,skipped,checked:(list.messages||[]).length});
   }
   if(action==="review" && request.method==="POST"){
     const body=await request.json();
