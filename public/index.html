@@ -91,8 +91,9 @@
   .quick-add-options .btn{justify-content:center;min-height:44px}
   @media (max-width:600px){
     .topbar-actions{width:100%;flex-direction:column;align-items:stretch}
-    .topbar-actions .segmented{display:grid;grid-template-columns:repeat(5,minmax(0,1fr))}
+    .topbar-actions .segmented{display:grid;grid-template-columns:repeat(5,minmax(min-content,1fr))}
     .topbar-actions .segmented button{padding-inline:4px}
+    .segmented .review-badge{font-size:10px;padding-inline:3px;min-width:15px}
     .quick-add{width:min(100%, 20rem);align-self:center}
     #addBtn{width:100%}
     .quick-add-options{position:static;grid-template-columns:1fr 1fr;margin-top:6px;min-width:0}
@@ -112,6 +113,14 @@
     font-size:0.85rem; font-weight:600; padding:7px 16px; border-radius:999px;
     cursor:pointer; transition:background .15s ease, color .15s ease;
   }
+  .segmented .review-tab{display:flex;align-items:center;justify-content:center;gap:4px;white-space:nowrap}
+  .segmented .review-tab:has(.review-badge:not([hidden])){justify-content:space-between}
+  .review-badge{display:inline-block;background:#b93232;color:#fff;border-radius:999px;padding:1px 5px;font-size:11px;font-weight:700;min-width:17px;text-align:center}
+  .review-shortcuts{display:flex;gap:8px;flex-wrap:wrap}
+  .review-shortcuts .btn{justify-content:space-between;min-width:112px}
+  .review-shortcuts strong{margin-inline-start:auto}
+  #weekItems .week-overdue,#weekItems .week-overdue .name,#weekItems .week-overdue small,
+  #generalTasks .task-row.overdue .task-title{color:var(--danger)}
   .segmented button.active{ background:var(--accent); color:var(--accent-contrast); }
 
   .btn{
@@ -443,8 +452,8 @@
       <div class="segmented" role="tablist" aria-label="View">
         <button type="button" data-view="agenda" class="active">Agenda</button>
         <button type="button" data-view="year">Year</button>
-        <button type="button" data-view="school">School <span id="schoolTabBadge" class="review-badge" hidden></span></button>
-        <button type="button" data-view="personal">Personal <span id="personalTabBadge" class="review-badge" hidden></span></button>
+        <button type="button" data-view="school" class="review-tab"><span>School</span><span id="schoolTabBadge" class="review-badge" hidden></span></button>
+        <button type="button" data-view="personal" class="review-tab"><span>Personal</span><span id="personalTabBadge" class="review-badge" hidden></span></button>
         <button type="button" data-view="lists">Lists</button>
       </div>
       <div class="quick-add">
@@ -457,7 +466,6 @@
     </div>
   </header>
 
-  <style>.review-badge{display:inline-block;background:#b93232;color:white;border-radius:999px;padding:1px 6px;font-size:11px;font-weight:700;min-width:17px;text-align:center}.review-badge[hidden]{display:none}</style>
   <div class="filter-bar" id="mainFilters" aria-label="Filter calendar events">
     <span class="filter-label">Calendar</span>
     <button type="button" class="filter-btn active" data-filter="all" aria-pressed="true">All</button>
@@ -492,7 +500,7 @@
       </section>
       <section class="school-card" id="emailReviewSummary" aria-label="Emails awaiting review">
         <h2>📬 Emails to review <span id="reviewTotal">…</span></h2>
-        <p><button type="button" class="btn btn-ghost" id="reviewSchoolJump">School: <strong id="reviewSchoolCount">…</strong> →</button> <button type="button" class="btn btn-ghost" id="reviewPersonalJump">Personal: <strong id="reviewPersonalCount">…</strong> →</button></p>
+        <p class="review-shortcuts"><button type="button" class="btn btn-ghost" id="reviewSchoolJump"><span>School</span><strong id="reviewSchoolCount">…</strong></button><button type="button" class="btn btn-ghost" id="reviewPersonalJump"><span>Personal</span><strong id="reviewPersonalCount">…</strong></button></p>
         <p class="hint" id="reviewScanHint">Counts reflect emails already scanned, not your live Gmail inbox.</p>
       </section>
       <section class="school-card" id="generalTasks" aria-label="General tasks">
@@ -1413,7 +1421,11 @@
     document.getElementById("reviewPersonalCount").textContent=personal===null?"—":personal;
     document.getElementById("reviewTotal").textContent=total===null?"—":total;
     [["schoolTabBadge",school],["personalTabBadge",personal]].forEach(function(entry){
-      var badge=document.getElementById(entry[0]);badge.hidden=!(entry[1]>0);badge.textContent=entry[1]||"";
+      var badge = document.getElementById(entry[0]);
+      var count = entry[1];
+      badge.hidden = !(count > 0);
+      badge.textContent = count > 99 ? "99+" : count || "";
+      badge.setAttribute("aria-label", count + " emails to review");
     });
     var hint=document.getElementById("reviewScanHint");
     var last=localStorage.getItem("almanacLastEmailScan");
@@ -2038,13 +2050,14 @@
       var group = item.date < dateToStr(today) ? "overdue" : item.date;
       if(group !== previous){
         var heading = document.createElement("h3");
+        if(group === "overdue") heading.classList.add("week-overdue");
         heading.textContent = group === "overdue" ? "Overdue" : (item.date === dateToStr(today) ? "Today · " : "") + dayLabel.format(strToDate(item.date));
         list.appendChild(heading);
         previous = group;
       }
       var button = document.createElement("button");
       button.type = "button";
-      button.className = "month-event";
+      button.className = "month-event" + (group === "overdue" ? " week-overdue" : "");
       button.style.gridTemplateColumns = "minmax(0, 1fr)";
       var title = document.createElement("span");
       title.className = "name";
@@ -2911,6 +2924,7 @@
       });
       var dueLabel = document.createElement("label");
       var overdue = !task.done && task.dueDate && task.dueDate < today;
+      if(overdue) row.classList.add("overdue");
       dueLabel.className = "task-date-label" + (overdue ? " overdue" : "");
       dueLabel.textContent = overdue ? "Overdue" : "Due date";
       var due = document.createElement("input");
